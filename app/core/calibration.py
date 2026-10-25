@@ -35,7 +35,7 @@ from app.core.mass_error import (
     calculate_signed_error_ppm,
     is_within_mass_tolerance,
 )
-from app.parsers.base_models import SpectrumData, SpectrumPeak
+from app.parsers.base_models import SpectrumData, SpectrumDataType, SpectrumPeak
 
 
 class CalibrationModelType(str, Enum):
@@ -80,6 +80,7 @@ class CalibrationSettings:
     min_rel_intensity_pct: float = 0.5
     max_residual_ppm_threshold: float = 25.0
     require_calibration_success: bool = False
+    reject_outliers: bool = True
 
 
 @dataclass(frozen=True)
@@ -163,12 +164,76 @@ def get_default_peptide_calibrants() -> List[CalibrantReference]:
     return calibrants
 
 
+CALIBRANT_PANELS: Dict[str, str] = {
+    "nglycan_na": "Canonical human N-glycans [M+Na]+ (positive)",
+    "nglycan_h": "Canonical human N-glycans [M+H]+ (positive)",
+    "nglycan_neg": "Canonical human N-glycans [M-H]- (negative)",
+    "peptide_h": "MALDI peptide calibration standard [M+H]+ (positive)",
+}
+
+
+def get_calibrants_for_panel(panel: str, labeling: str = "NONE") -> List[CalibrantReference]:
+    """Return calibrants for a named reference panel (see `CALIBRANT_PANELS`)."""
+    key = panel.strip().lower()
+    if key == "peptide_h":
+        return get_default_peptide_calibrants()
+    if key == "nglycan_h":
+        return get_default_nglycan_calibrants(adduct="[M+H]+", labeling=labeling)
+    if key == "nglycan_neg":
+        return get_default_nglycan_calibrants(adduct="[M-H]-", labeling=labeling)
+    if key == "nglycan_na":
+        return get_default_nglycan_calibrants(adduct="[M+Na]+", labeling=labeling)
+    raise ValueError(f"Unknown calibrant panel '{panel}'. Choose from {sorted(CALIBRANT_PANELS)} or 'auto'.")
+
+
+def select_best_calibrant_panel(
+    spectrum: SpectrumData,
+    settings: Optional["CalibrationSettings"] = None,
+    labeling: str = "NONE",
+    candidate_panels: Optional[Sequence[str]] = None,
+) -> Tuple[str, Dict[str, int]]:
+    """Pick the panel with the most matched calibrants (ties: panel order). Returns (panel, counts)."""
+    panels = list(candidate_panels or ("nglycan_na", "nglycan_neg", "nglycan_h", "peptide_h"))
+    counts: Dict[str, int] = {}
+    for name in panels:
+        matched, _ = match_calibrants_to_spectrum(spectrum, get_calibrants_for_panel(name, labeling), settings)
+        counts[name] = len(matched)
+    best = max(panels, key=lambda n: (counts[n], -panels.index(n)))
+    return best, counts
+
+
+def _refine_profile_apex(peaks: Sequence[SpectrumPeak], idx: int) -> SpectrumPeak:
+    """Refine the m/z of a profile maximum with an intensity-weighted centroid over its upper half.
+
+    On profile data the highest raw point is only accurate to half the point spacing; the weighted
+    centroid over the points above 50 % of the apex height is far more accurate (sub-ppm to a few ppm).
+    """
+    apex = peaks[idx]
+    thr = 0.5 * apex.intensity
+    lo = idx
+    while lo > 0 and peaks[lo - 1].intensity >= thr and peaks[lo - 1].intensity <= peaks[lo].intensity * 1.0000001:
+        lo -= 1
+    hi = idx
+    while hi < len(peaks) - 1 and peaks[hi + 1].intensity >= thr and peaks[hi + 1].intensity <= peaks[hi].intensity * 1.0000001:
+        hi += 1
+    seg = peaks[lo: hi + 1]
+    tot = sum(p.intensity for p in seg)
+    if len(seg) < 3 or tot <= 0:
+        return apex
+    mz = sum(p.mz * p.intensity for p in seg) / tot
+    return replace(apex, mz=float(mz))
+
+
 def match_calibrants_to_spectrum(
     spectrum: SpectrumData,
     calibrants: Sequence[CalibrantReference],
     settings: Optional[CalibrationSettings] = None,
 ) -> Tuple[List[Tuple[CalibrantReference, SpectrumPeak]], List[CalibrantReference]]:
-    """Match reference calibrants to the highest-intensity eligible peak within tolerance."""
+    """Match reference calibrants to the highest-intensity eligible peak within tolerance.
+
+    Uses binary search on the m/z-sorted peak array (fast on large profile spectra) and refines the
+    apex m/z of profile data with an intensity-weighted centroid.
+    """
     if settings is None:
         settings = CalibrationSettings()
 
@@ -182,15 +247,26 @@ def match_calibrants_to_spectrum(
         else 0.0
     )
 
-    eligible_peaks = [p for p in spectrum.peaks if p.intensity >= min_abs_intensity]
+    sorted_peaks = sorted(spectrum.peaks, key=lambda p: p.mz)
+    is_profile = spectrum.data_type == SpectrumDataType.PROFILE
+    mz_arr = np.array([p.mz for p in sorted_peaks], dtype=np.float64)
+
     matched_pairs: List[Tuple[CalibrantReference, SpectrumPeak]] = []
     unmatched: List[CalibrantReference] = []
     used_peak_indices: set[int] = set()
 
     for cal in calibrants:
+        if settings.match_tolerance_unit == MassToleranceUnit.PPM:
+            half_w = cal.theoretical_mz * settings.match_tolerance * 1e-6 * 1.5 + 1e-9
+        else:
+            half_w = settings.match_tolerance * 1.5 + 1e-9
+        lo = int(np.searchsorted(mz_arr, cal.theoretical_mz - half_w, side="left"))
+        hi = int(np.searchsorted(mz_arr, cal.theoretical_mz + half_w, side="right"))
+
         candidates: List[Tuple[int, SpectrumPeak, float]] = []
-        for idx, pk in enumerate(eligible_peaks):
-            if idx in used_peak_indices:
+        for idx in range(lo, hi):
+            pk = sorted_peaks[idx]
+            if idx in used_peak_indices or pk.intensity < min_abs_intensity:
                 continue
             if is_within_mass_tolerance(
                 observed=pk.mz,
@@ -198,8 +274,7 @@ def match_calibrants_to_spectrum(
                 tolerance=settings.match_tolerance,
                 unit=settings.match_tolerance_unit,
             ):
-                abs_err = calculate_abs_error_ppm(pk.mz, cal.theoretical_mz)
-                candidates.append((idx, pk, abs_err))
+                candidates.append((idx, pk, calculate_abs_error_ppm(pk.mz, cal.theoretical_mz)))
 
         if not candidates:
             unmatched.append(cal)
@@ -209,6 +284,8 @@ def match_calibrants_to_spectrum(
         candidates.sort(key=lambda item: (-item[1].intensity, item[2]))
         best_idx, best_peak, _ = candidates[0]
         used_peak_indices.add(best_idx)
+        if is_profile:
+            best_peak = _refine_profile_apex(sorted_peaks, best_idx)
         matched_pairs.append((cal, best_peak))
 
     return matched_pairs, unmatched
@@ -259,6 +336,25 @@ def calibrate_spectrum(
 
     min_required = 2 if settings.model_type == CalibrationModelType.LINEAR else 3
     recommended_min = 3 if settings.model_type == CalibrationModelType.LINEAR else 4
+
+    # Robust fit: iteratively drop the calibrant with the largest post-fit residual when it exceeds
+    # the residual threshold (typically a mis-assigned peak), while keeping the minimum count.
+    if settings.reject_outliers and len(matched_pairs) > min_required:
+        degree_ = 1 if settings.model_type == CalibrationModelType.LINEAR else 2
+        while len(matched_pairs) > min_required:
+            o = np.array([pk.mz for _, pk in matched_pairs], dtype=np.float64)
+            t = np.array([c.theoretical_mz for c, _ in matched_pairs], dtype=np.float64)
+            fit = np.polyfit(o, t, deg=degree_)
+            res_ppm = (np.polyval(fit, o) - t) / t * 1e6
+            worst = int(np.argmax(np.abs(res_ppm)))
+            if abs(res_ppm[worst]) <= settings.max_residual_ppm_threshold:
+                break
+            cal_rej, _ = matched_pairs.pop(worst)
+            unmatched.append(cal_rej)
+            warnings.append(
+                f"Calibrant '{cal_rej.name}' rejected as outlier (residual {res_ppm[worst]:+.1f} ppm "
+                f"> {settings.max_residual_ppm_threshold:.1f} ppm)."
+            )
 
     if len(matched_pairs) < min_required:
         msg = (

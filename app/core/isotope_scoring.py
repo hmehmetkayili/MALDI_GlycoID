@@ -41,6 +41,53 @@ class IsotopeScoreResult:
     status_message: str
     theoretical_envelope: Tuple[IsotopicPeak, ...]
     observed_intensities_matched: Tuple[float, ...]
+    observed_mzs_matched: Tuple[Optional[float], ...] = ()
+
+    def to_comparison_dict(self, ion_formula_str: str = "") -> Dict[str, object]:
+        """Serialize theoretical vs experimental isotope envelope for interactive UI plotting."""
+        max_obs = max(self.observed_intensities_matched, default=0.0)
+        tot_obs = sum(self.observed_intensities_matched)
+        peaks_list = []
+        for idx, theo_pk in enumerate(self.theoretical_envelope):
+            obs_int = self.observed_intensities_matched[idx] if idx < len(self.observed_intensities_matched) else 0.0
+            obs_mz = (
+                self.observed_mzs_matched[idx]
+                if idx < len(self.observed_mzs_matched)
+                else None
+            )
+            obs_base_ratio = (obs_int / max_obs * 100.0) if max_obs > 0 and obs_int > 0 else 0.0
+            obs_rel_abund = (obs_int / tot_obs) if tot_obs > 0 and obs_int > 0 else 0.0
+            err_ppm = (
+                round(((obs_mz - theo_pk.mz) / theo_pk.mz) * 1e6, 2)
+                if (obs_mz is not None and theo_pk.mz > 0)
+                else None
+            )
+            peaks_list.append(
+                {
+                    "neutron_offset": theo_pk.neutron_offset,
+                    "label": f"M+{theo_pk.neutron_offset}",
+                    "theoretical_mz": round(theo_pk.mz, 5),
+                    "theoretical_abundance_pct": round(theo_pk.relative_abundance * 100.0, 2),
+                    "theoretical_base_ratio_pct": round(theo_pk.base_peak_ratio, 2),
+                    "observed_mz": round(obs_mz, 5) if obs_mz is not None else None,
+                    "observed_intensity": round(obs_int, 2),
+                    "observed_abundance_pct": round(obs_rel_abund * 100.0, 2),
+                    "observed_base_ratio_pct": round(obs_base_ratio, 2),
+                    "delta_base_ratio_pct": round(obs_base_ratio - theo_pk.base_peak_ratio, 2)
+                    if obs_int > 0
+                    else None,
+                    "error_ppm": err_ppm,
+                }
+            )
+        return {
+            "available": self.available,
+            "idotp": self.idotp,
+            "matched_isotope_peaks": self.matched_isotope_peaks,
+            "expected_isotope_peaks": self.expected_isotope_peaks,
+            "status_message": self.status_message,
+            "ion_formula": ion_formula_str,
+            "isotopologues": peaks_list,
+        }
 
 
 def _convolve_distributions(
@@ -153,6 +200,91 @@ def generate_theoretical_isotope_envelope(
     return tuple(peaks)
 
 
+def score_envelope_against_peaks(
+    theo_envelope: Sequence[IsotopicPeak],
+    obs_mz_sorted: np.ndarray,
+    obs_int_sorted: np.ndarray,
+    tolerance: float = 20.0,
+    tolerance_unit: MassToleranceUnit = MassToleranceUnit.PPM,
+    min_matched_isotopes: int = 2,
+) -> IsotopeScoreResult:
+    """Score a precomputed theoretical envelope against m/z-sorted observed peaks (fast path).
+
+    Nearest-peak lookup uses binary search (O(log n) per isotopologue) instead of a full
+    array scan, so scoring thousands of candidates against a large peak list stays cheap.
+    """
+    theo_envelope = tuple(theo_envelope)
+    n_obs = len(obs_mz_sorted)
+
+    def _unavailable(matched_count: int, ints: Sequence[float], mzs: Sequence[Optional[float]]) -> IsotopeScoreResult:
+        return IsotopeScoreResult(
+            available=False,
+            idotp=None,
+            matched_isotope_peaks=matched_count,
+            expected_isotope_peaks=len(theo_envelope),
+            status_message="Insufficient isotope information for isotope scoring",
+            theoretical_envelope=theo_envelope,
+            observed_intensities_matched=tuple(ints),
+            observed_mzs_matched=tuple(mzs),
+        )
+
+    # Fewer observed peaks than required isotopologues: score is meaningless
+    if n_obs < min_matched_isotopes or len(theo_envelope) < min_matched_isotopes:
+        return _unavailable(min(n_obs, 1), (), ())
+
+    matched_ints: List[float] = []
+    matched_mzs: List[Optional[float]] = []
+    matched_count = 0
+
+    for iso_peak in theo_envelope:
+        pos = int(np.searchsorted(obs_mz_sorted, iso_peak.mz))
+        best_idx = -1
+        best_diff = math.inf
+        for j in (pos - 1, pos):
+            if 0 <= j < n_obs:
+                d = abs(float(obs_mz_sorted[j]) - iso_peak.mz)
+                if d < best_diff:
+                    best_diff, best_idx = d, j
+        if best_idx >= 0:
+            cand_mz = float(obs_mz_sorted[best_idx])
+            cand_int = float(obs_int_sorted[best_idx])
+            if cand_int > 0 and is_within_mass_tolerance(
+                observed=cand_mz,
+                theoretical=iso_peak.mz,
+                tolerance=tolerance,
+                unit=tolerance_unit,
+            ):
+                matched_ints.append(cand_int)
+                matched_mzs.append(cand_mz)
+                matched_count += 1
+                continue
+        matched_ints.append(0.0)
+        matched_mzs.append(None)
+
+    if matched_count < min_matched_isotopes:
+        return _unavailable(matched_count, matched_ints, matched_mzs)
+
+    theo_vec = np.array([p.relative_abundance for p in theo_envelope], dtype=float)
+    obs_vec = np.array(matched_ints, dtype=float)
+    norm_theo = float(np.linalg.norm(theo_vec))
+    norm_obs = float(np.linalg.norm(obs_vec))
+    if norm_theo <= 0.0 or norm_obs <= 0.0:
+        return _unavailable(matched_count, matched_ints, matched_mzs)
+
+    dot = float(np.dot(theo_vec, obs_vec) / (norm_theo * norm_obs))
+    dot = max(0.0, min(1.0, dot))
+    return IsotopeScoreResult(
+        available=True,
+        idotp=round(dot, 6),
+        matched_isotope_peaks=matched_count,
+        expected_isotope_peaks=len(theo_envelope),
+        status_message=f"Isotope envelope scored across {matched_count}/{len(theo_envelope)} peaks",
+        theoretical_envelope=theo_envelope,
+        observed_intensities_matched=tuple(matched_ints),
+        observed_mzs_matched=tuple(matched_mzs),
+    )
+
+
 def calculate_isotope_dot_product(
     observed_mzs: Sequence[float],
     observed_intensities: Sequence[float],
@@ -182,79 +314,18 @@ def calculate_isotope_dot_product(
     if len(observed_mzs) != len(observed_intensities):
         raise ValueError("observed_mzs and observed_intensities must have equal length")
 
-    # If the input only provided a single peak (or empty), isotope scoring is unavailable
-    if len(observed_mzs) < min_matched_isotopes or len(theo_envelope) < min_matched_isotopes:
-        return IsotopeScoreResult(
-            available=False,
-            idotp=None,
-            matched_isotope_peaks=min(len(observed_mzs), 1),
-            expected_isotope_peaks=len(theo_envelope),
-            status_message="Insufficient isotope information for isotope scoring",
-            theoretical_envelope=theo_envelope,
-            observed_intensities_matched=(),
-        )
-
-    matched_obs_intensities: List[float] = []
-    matched_count = 0
-
     obs_mz_arr = np.asarray(observed_mzs, dtype=float)
     obs_int_arr = np.asarray(observed_intensities, dtype=float)
+    if len(obs_mz_arr) > 1 and np.any(np.diff(obs_mz_arr) < 0):
+        order = np.argsort(obs_mz_arr, kind="stable")
+        obs_mz_arr = obs_mz_arr[order]
+        obs_int_arr = obs_int_arr[order]
 
-    for iso_peak in theo_envelope:
-        # Find closest observed peak within tolerance
-        diffs = np.abs(obs_mz_arr - iso_peak.mz)
-        best_idx = int(np.argmin(diffs))
-        candidate_mz = float(obs_mz_arr[best_idx])
-        candidate_int = float(obs_int_arr[best_idx])
-
-        if candidate_int > 0 and is_within_mass_tolerance(
-            observed=candidate_mz,
-            theoretical=iso_peak.mz,
-            tolerance=tolerance,
-            unit=tolerance_unit,
-        ):
-            matched_obs_intensities.append(candidate_int)
-            matched_count += 1
-        else:
-            matched_obs_intensities.append(0.0)
-
-    if matched_count < min_matched_isotopes:
-        return IsotopeScoreResult(
-            available=False,
-            idotp=None,
-            matched_isotope_peaks=matched_count,
-            expected_isotope_peaks=len(theo_envelope),
-            status_message="Insufficient isotope information for isotope scoring",
-            theoretical_envelope=theo_envelope,
-            observed_intensities_matched=tuple(matched_obs_intensities),
-        )
-
-    # Compute normalized cosine similarity (dot product) between theoretical and observed vectors
-    theo_vec = np.array([p.relative_abundance for p in theo_envelope], dtype=float)
-    obs_vec = np.array(matched_obs_intensities, dtype=float)
-
-    norm_theo = float(np.linalg.norm(theo_vec))
-    norm_obs = float(np.linalg.norm(obs_vec))
-    if norm_theo <= 0.0 or norm_obs <= 0.0:
-        return IsotopeScoreResult(
-            available=False,
-            idotp=None,
-            matched_isotope_peaks=matched_count,
-            expected_isotope_peaks=len(theo_envelope),
-            status_message="Insufficient isotope information for isotope scoring",
-            theoretical_envelope=theo_envelope,
-            observed_intensities_matched=tuple(matched_obs_intensities),
-        )
-
-    dot = float(np.dot(theo_vec, obs_vec) / (norm_theo * norm_obs))
-    dot = max(0.0, min(1.0, dot))
-
-    return IsotopeScoreResult(
-        available=True,
-        idotp=round(dot, 6),
-        matched_isotope_peaks=matched_count,
-        expected_isotope_peaks=len(theo_envelope),
-        status_message=f"Isotope envelope scored across {matched_count}/{len(theo_envelope)} peaks",
-        theoretical_envelope=theo_envelope,
-        observed_intensities_matched=tuple(matched_obs_intensities),
+    return score_envelope_against_peaks(
+        theo_envelope=theo_envelope,
+        obs_mz_sorted=obs_mz_arr,
+        obs_int_sorted=obs_int_arr,
+        tolerance=tolerance,
+        tolerance_unit=tolerance_unit,
+        min_matched_isotopes=min_matched_isotopes,
     )

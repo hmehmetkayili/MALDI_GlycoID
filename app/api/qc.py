@@ -26,8 +26,8 @@ from app.core.calibration import (
     CalibrationModelType,
     CalibrationSettings,
     calibrate_spectrum,
-    get_default_nglycan_calibrants,
-    get_default_peptide_calibrants,
+    get_calibrants_for_panel,
+    select_best_calibrant_panel,
 )
 from app.core.mass_error import MassToleranceUnit
 
@@ -36,39 +36,51 @@ router = APIRouter(prefix="/api/qc", tags=["qc"])
 
 @router.post("/calibrate")
 def calibrate_spectrum_endpoint(request: Request) -> Dict[str, Any]:
-    """Run linear or quadratic internal/external mass calibration on the active spectrum."""
-    payload = request.json_sync()
-    spectrum = session_state.get_or_load_spectrum()
+    """Run mass calibration on the imported spectrum (see `run_calibration`)."""
+    return run_calibration(request.json_sync())
+
+
+def run_calibration(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Run linear or quadratic internal/external mass calibration on the imported spectrum.
+
+    Calibration is always computed from the uncalibrated (imported / corrected) spectrum so that
+    repeated runs never compound. Run it BEFORE the MS1 search; the search then uses the calibrated
+    m/z axis. Any previous search/quantification results are invalidated.
+
+    `reference_set` may be `nglycan_na`, `nglycan_h`, `nglycan_neg`, `peptide_h` or `auto`
+    (the panel matching the most peaks is chosen).
+    """
+    spectrum = session_state.get_base_spectrum()
 
     try:
         model_str = str(payload.get("model_type", "linear")).strip().lower()
         model_type = CalibrationModelType.QUADRATIC if model_str == "quadratic" else CalibrationModelType.LINEAR
         ref_set = str(payload.get("reference_set", "nglycan_na")).strip().lower()
         tol_ppm = float(payload.get("match_tolerance_ppm", 150.0))
+        labeling = str(payload.get("labeling", "NONE")).strip().upper() or "NONE"
 
-        calibrants = (
-            get_default_peptide_calibrants()
-            if ref_set == "peptide_h"
-            else get_default_nglycan_calibrants(adduct="[M+Na]+", labeling="NONE")
-        )
         cal_settings = CalibrationSettings(
             model_type=model_type,
             match_tolerance=tol_ppm,
             match_tolerance_unit=MassToleranceUnit.PPM,
             require_calibration_success=False,
         )
+        panel_counts: Dict[str, int] = {}
+        if ref_set == "auto":
+            ref_set, panel_counts = select_best_calibrant_panel(spectrum, cal_settings, labeling=labeling)
+        calibrants = get_calibrants_for_panel(ref_set, labeling=labeling)
         cal_res = calibrate_spectrum(
             spectrum=spectrum,
             calibrants=calibrants,
             settings=cal_settings,
         )
-        session_state.calibration_result = cal_res
-        if cal_res.applied:
-            session_state.active_spectrum = cal_res.calibrated_spectrum
+        session_state.set_calibration(cal_res)
 
         return {
             "sample_id": cal_res.sample_id,
             "applied": cal_res.applied,
+            "reference_set": ref_set,
+            "panel_match_counts": panel_counts,
             "model_type": cal_res.model_type.value,
             "coefficients": list(cal_res.coefficients),
             "matched_calibrants_count": len(cal_res.matched_calibrants),
@@ -93,6 +105,14 @@ def calibrate_spectrum_endpoint(request: Request) -> Dict[str, Any]:
         }
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Mass calibration error: {exc}") from exc
+
+
+@router.post("/calibrate/reset")
+def reset_calibration_endpoint() -> Dict[str, Any]:
+    """Discard the calibration and return to the uncalibrated (imported / corrected) spectrum."""
+    session_state.get_or_load_spectrum()
+    session_state.reset_calibration()
+    return {"is_calibrated": False, "message": "Calibration removed; spectrum is uncalibrated."}
 
 
 @router.post("/evaluate")

@@ -11,6 +11,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
+import numpy as np
+
 
 class SpectrumDataType(str, Enum):
     """Classification of imported mass spectrum signal representation."""
@@ -124,6 +126,17 @@ class SpectrumData:
         max_int = self.max_intensity if self.max_intensity > 0 else max((pk.intensity for pk in self.peaks), default=0.0)
         if n <= max_points:
             return [self._serialize_peak(idx + 1, p, max_int) for idx, p in enumerate(self.peaks)]
+
+        if self.data_type == SpectrumDataType.PROFILE:
+            # Max-pooling decimation keeps every peak apex visible (plain striding would drop narrow peaks)
+            ints = np.fromiter((p.intensity for p in self.peaks), dtype=float, count=n)
+            edges = np.linspace(0, n, max_points + 1).astype(int)
+            keep = set()
+            for a, b in zip(edges[:-1], edges[1:]):
+                if b > a:
+                    keep.add(int(a + np.argmax(ints[a:b])))
+                    keep.add(int(a))
+            return [self._serialize_peak(idx + 1, self.peaks[idx], max_int) for idx in sorted(keep)]
 
         # Always include the top 120 highest-intensity peaks plus evenly spaced points across m/z
         indexed = list(enumerate(self.peaks))

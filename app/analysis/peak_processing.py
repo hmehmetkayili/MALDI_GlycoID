@@ -23,6 +23,10 @@ from app.parsers.base_models import (
 )
 
 
+# NumPy >= 2.0 renamed `trapz` to `trapezoid` (and later removed `trapz`)
+_trapezoid = getattr(np, "trapezoid", None) or getattr(np, "trapz")
+
+
 @dataclass(frozen=True)
 class PeakPreprocessingConfig:
     """Configuration for optional peak filtering and profile peak detection."""
@@ -49,6 +53,7 @@ class ProcessedSpectrumResult:
     max_eligible_intensity: float
     was_profile_processed: bool
     warnings: Tuple[str, ...] = field(default_factory=tuple)
+    isotope_pool_peaks: Tuple[SpectrumPeak, ...] = field(default_factory=tuple)
 
 
 def estimate_profile_baseline_and_noise(
@@ -97,8 +102,15 @@ def detect_and_integrate_profile_peaks(
     min_snr: float = 3.0,
     window_points: int = 51,
     percentile: float = 10.0,
+    noise_override: Optional[np.ndarray] = None,
+    min_fwhm_points: int = 0,
 ) -> List[SpectrumPeak]:
-    """Detect local maxima on a profile spectrum and compute baseline-corrected intensity, S/N, FWHM, and area."""
+    """Detect local maxima on a profile spectrum and compute baseline-corrected intensity, S/N, FWHM, and area.
+
+    `noise_override` supplies a per-point noise estimate (e.g. measured before baseline clipping);
+    `min_fwhm_points` rejects single-point spikes by requiring at least that many points at or above
+    half-maximum (0 disables the check).
+    """
     n = len(mzs)
     if n < 5:
         return []
@@ -108,15 +120,21 @@ def detect_and_integrate_profile_peaks(
         window_points=window_points,
         percentile=percentile,
     )
+    if noise_override is not None and len(noise_override) == n:
+        noise = np.maximum(np.asarray(noise_override, dtype=np.float64), 1e-6)
     corr_int = np.maximum(0.0, intensities - baseline) if subtract_baseline else np.maximum(0.0, intensities)
 
     detected: List[SpectrumPeak] = []
-    for i in range(1, n - 1):
+    # Vectorised candidate search: strict local maxima (or left edge of flat top) above the S/N floor.
+    # Only these candidates enter the (Python) refinement loop, which makes profile peak picking fast.
+    inner = corr_int[1:-1]
+    cand_mask = (inner > 0.0) & (inner > corr_int[:-2]) & (inner >= corr_int[2:])
+    with np.errstate(divide="ignore", invalid="ignore"):
+        snr_all = np.where(noise[1:-1] > 0, inner / noise[1:-1], np.inf)
+    cand_mask &= snr_all >= min_snr
+    for i in (np.flatnonzero(cand_mask) + 1).tolist():
         y_curr = corr_int[i]
-        if y_curr <= 0.0:
-            continue
-        # Strict local maximum (or left edge of flat top)
-        if y_curr > corr_int[i - 1] and y_curr >= corr_int[i + 1]:
+        if y_curr > 0.0:
             snr_val = float(y_curr / noise[i]) if noise[i] > 0 else None
             if snr_val is not None and snr_val < min_snr:
                 continue
@@ -142,7 +160,7 @@ def detect_and_integrate_profile_peaks(
 
             area_val: Optional[float] = None
             if integrate_area and right > left:
-                area_val = float(np.trapz(corr_int[left : right + 1], mzs[left : right + 1]))
+                area_val = float(_trapezoid(corr_int[left : right + 1], mzs[left : right + 1]))
 
             # Estimate FWHM at 50% height
             half_h = 0.5 * y_curr
@@ -153,6 +171,8 @@ def detect_and_integrate_profile_peaks(
             while r_hm > i and corr_int[r_hm] < half_h:
                 r_hm -= 1
             fwhm_val = float(mzs[r_hm] - mzs[l_hm]) if r_hm > l_hm else None
+            if min_fwhm_points > 0 and (r_hm - l_hm + 1) < min_fwhm_points:
+                continue
 
             detected.append(
                 SpectrumPeak(
@@ -219,6 +239,17 @@ def preprocess_spectrum(
             f"Automatically detected and integrated {len(working_peaks)} centroid peaks from profile spectrum."
         )
 
+    # When an S/N threshold is requested but peaks carry no S/N (typical for centroid lists),
+    # estimate a relative local S/N so the filter is still meaningful (and say so explicitly).
+    if config.min_snr is not None and config.min_snr > 0 and any(p.snr is None for p in working_peaks):
+        from app.analysis.spectrum_corrections import fill_missing_snr
+
+        working_peaks, n_est = fill_missing_snr(working_peaks)
+        warnings.append(
+            f"S/N filter requested but {n_est} peaks had no instrument S/N; "
+            "a relative local-median S/N estimate was used for them."
+        )
+
     # Apply m/z range, absolute intensity, and S/N filters
     filtered: List[SpectrumPeak] = []
     for p in working_peaks:
@@ -245,6 +276,9 @@ def preprocess_spectrum(
         )
 
     max_int = max(p.intensity for p in filtered)
+    # Peaks passing the m/z / S/N filters but BEFORE the relative-intensity cut: kept for isotope
+    # envelope scoring so that weak M+1/M+2 satellites are not discarded by the intensity threshold.
+    isotope_pool = tuple(filtered)
 
     # Apply relative intensity % threshold if specified
     if config.min_relative_intensity_pct > 0.0 and max_int > 0.0:
@@ -262,4 +296,6 @@ def preprocess_spectrum(
         max_eligible_intensity=max_int,
         was_profile_processed=was_profile_processed,
         warnings=tuple(warnings),
+        isotope_pool_peaks=isotope_pool,
     )
+

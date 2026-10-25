@@ -590,12 +590,46 @@
     renderRawTxtInspector(summary);
     renderImportPeakTable();
     renderSpectrumSvg(summary.plot_peaks || summary.preview || []);
+    updateCalibrationStatusBanner(summary.is_calibrated ? appState.calibrationResult : null);
+  }
+
+  function updateCalibrationStatusBanner(calData) {
+    const statusText = document.getElementById("search-cal-status-text");
+    if (!statusText) return;
+    if (calData && calData.applied) {
+      const pre = calData.rms_ppm_before !== null ? Number(calData.rms_ppm_before).toFixed(2) : "—";
+      const post = calData.rms_ppm_after !== null ? Number(calData.rms_ppm_after).toFixed(2) : "—";
+      statusText.innerHTML = `<span class="badge badge-pass">CALIBRATED</span> Model: <code>${calData.model_type}</code> (${calData.matched_calibrants_count} calibrants, RMS error ${pre} &rarr; <strong>${post} ppm</strong>). Ready for MS1 search.`;
+    } else {
+      statusText.innerHTML = `<span class="badge badge-warn">UNCALIBRATED</span> Calibrate on imported data first (Import Data or button below) before running MS1 search.`;
+    }
+  }
+
+  function syncPolarityAdducts(polarity) {
+    const polEl = document.getElementById("search-polarity");
+    const addEl = document.getElementById("search-adducts");
+    if (polEl) polEl.value = polarity;
+    if (addEl) {
+      const cur = addEl.value.trim();
+      if (polarity === "negative" && (!cur || cur.includes("+"))) {
+        addEl.value = "[M-H]-, [M+Cl]-";
+      } else if (polarity === "positive" && (!cur || cur.includes("-"))) {
+        addEl.value = "[M+Na]+, [M+K]+, [M+H]+";
+      }
+    }
   }
 
   async function loadSyntheticExample(format = "csv", runPipeline = false) {
     try {
       hideAlert();
       const data = await apiRequest(`/api/spectra/example?format=${encodeURIComponent(format)}`);
+      appState.calibrationResult = null;
+      appState.ms1SearchResult = null;
+      if (format === "complex_neg") {
+        syncPolarityAdducts("negative");
+      } else if (format === "complex_pos") {
+        syncPolarityAdducts("positive");
+      }
       updateSpectrumUI(data);
       showAlert(`Loaded synthetic validation spectrum '${data.filename}' (${data.valid_points_count} peaks).`);
       if (runPipeline) {
@@ -623,6 +657,8 @@
     const mzCol = document.getElementById("import-mz-col").value.trim();
     const intCol = document.getElementById("import-int-col").value.trim();
     const dupPol = document.getElementById("import-dup-policy").value;
+    const minSnrEl = document.getElementById("import-min-snr");
+    const minSnr = minSnrEl ? minSnrEl.value.trim() : "";
 
     if (sid) formData.append("sample_id", sid);
     if (dtype) formData.append("user_specified_data_type", dtype);
@@ -631,6 +667,7 @@
     if (mzCol) formData.append("mz_column", mzCol);
     if (intCol) formData.append("intensity_column", intCol);
     if (dupPol) formData.append("duplicate_policy", dupPol);
+    if (minSnr) formData.append("min_snr", minSnr);
 
     try {
       hideAlert();
@@ -638,10 +675,55 @@
         method: "POST",
         body: formData,
       });
+      appState.calibrationResult = null;
+      appState.ms1SearchResult = null;
       updateSpectrumUI(data);
       showAlert(`Successfully parsed '${data.filename}' (${data.valid_points_count} valid peaks).`);
     } catch (err) {
       showAlert(`Spectrum import error: ${err.message}`, true);
+    }
+  }
+
+  async function applySpectrumCorrections(resetOnly = false) {
+    try {
+      hideAlert();
+      const pol = document.getElementById("search-polarity")?.value || "positive";
+      const payload = resetOnly
+        ? {}
+        : {
+            min_snr: document.getElementById("corr-min-snr")?.value || null,
+            min_relative_intensity_pct: Number(document.getElementById("corr-min-rel-int")?.value || 0),
+            min_mz: document.getElementById("corr-min-mz")?.value || null,
+            max_mz: document.getElementById("corr-max-mz")?.value || null,
+            normalize: document.getElementById("corr-normalize")?.value || null,
+            smoothing: Boolean(document.getElementById("corr-smoothing")?.checked),
+            baseline_correction: Boolean(document.getElementById("corr-baseline")?.checked),
+            pick_peaks: Boolean(document.getElementById("corr-pick-peaks")?.checked),
+            pick_min_snr: Number(document.getElementById("corr-min-snr")?.value || 5.0) || 5.0,
+            remove_matrix_peaks: Boolean(document.getElementById("corr-remove-matrix")?.checked),
+            matrix_polarity: pol,
+            merge_close_peaks: Boolean(document.getElementById("corr-merge-close")?.checked),
+          };
+      const data = await apiRequest("/api/spectra/process", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      appState.calibrationResult = null;
+      appState.ms1SearchResult = null;
+      updateSpectrumUI(data);
+      const box = document.getElementById("corrections-result-box");
+      if (box && data.corrections) {
+        const steps = (data.corrections.steps || []).map((s) => `<code>${s.step}</code> (&rarr; ${s.peaks_after})`).join(", ");
+        box.innerHTML = `<p><strong>Peaks (Before &rarr; After):</strong> ${data.corrections.peaks_before} &rarr; <strong>${data.corrections.peaks_after}</strong> | <strong>Steps:</strong> ${steps || "none (raw spectrum restored)"}</p>`;
+      }
+      showAlert(
+        resetOnly
+          ? `Restored raw imported spectrum (${data.valid_points_count} peaks).`
+          : `Applied MALDI corrections: ${data.valid_points_count} peaks active.`
+      );
+    } catch (err) {
+      showAlert(`MALDI spectrum processing error: ${err.message}`, true);
     }
   }
 
@@ -652,13 +734,17 @@
 
     const tbody = document.querySelector("#table-library-entries tbody");
     if (!entries || entries.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="9" class="muted">No matching library entries found.</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="12" class="muted">No matching library entries found.</td></tr>`;
       return;
     }
     tbody.innerHTML = entries
       .slice(0, 100)
       .map((e) => {
         const adducts = e.adduct_mzs || {};
+        const neg = e.negative_mode_mz || {};
+        const mhNeg = neg["[M-H]-"] ?? adducts["[M-H]-"];
+        const mclNeg = neg["[M+Cl]-"] ?? adducts["[M+Cl]-"];
+        const m2hNeg = neg["[M-2H]2-"] ?? adducts["[M-2H]2-"];
         return `
         <tr>
           <td><code>${e.library_id}</code></td>
@@ -669,6 +755,9 @@
           <td>${adducts["[M+Na]+"] ? Number(adducts["[M+Na]+"]).toFixed(4) : "—"}</td>
           <td>${adducts["[M+H]+"] ? Number(adducts["[M+H]+"]).toFixed(4) : "—"}</td>
           <td>${adducts["[M+K]+"] ? Number(adducts["[M+K]+"]).toFixed(4) : "—"}</td>
+          <td>${mhNeg ? Number(mhNeg).toFixed(4) : "—"}</td>
+          <td>${mclNeg ? Number(mclNeg).toFixed(4) : "—"}</td>
+          <td>${m2hNeg ? Number(m2hNeg).toFixed(4) : "—"}</td>
           <td><span class="badge badge-pass">${e.structural_annotation_status}</span></td>
         </tr>
       `;
@@ -763,7 +852,12 @@
         labeling: document.getElementById("search-labeling").value,
         adduct_codes: adducts,
         charge_states: charges,
-        min_relative_intensity_pct: Number(document.getElementById("search-min-rel-int").value),
+        min_relative_intensity_pct: Number(document.getElementById("search-min-rel-int").value || 0),
+        min_snr: Number(document.getElementById("search-min-snr")?.value || 0),
+        min_score: Number(document.getElementById("search-min-score")?.value || 0),
+        min_idotp: Number(document.getElementById("search-min-idotp")?.value || 0),
+        require_isotope_support: Boolean(document.getElementById("search-require-isotope")?.checked),
+        exclude_isotope_satellites: Boolean(document.getElementById("search-exclude-satellites")?.checked),
         targeted_compositions: targets,
       };
 
@@ -792,6 +886,11 @@
             const ambigBadge = m.is_ambiguous
               ? `<span class="badge badge-warn">AMBIGUOUS (${m.total_candidates_for_peak})</span> <small>${(m.alternative_candidates || []).slice(0, 2).join("; ")}</small>`
               : `<span class="badge badge-pass">Unique</span>`;
+            const idotpLabel =
+              m.isotope_score_idotp !== null && m.isotope_score_idotp !== undefined
+                ? Number(m.isotope_score_idotp).toFixed(3)
+                : "Plot M0..M+4";
+            const idotpBtn = `<button type="button" class="btn btn-outline btn-xs btn-idotp-plot" data-lib-id="${m.library_id || ""}" data-comp="${m.glycan_composition}" data-adduct="${m.assigned_adduct}" title="Click to compare Theoretical vs. Experimental Isotope Envelope">${idotpLabel}</button>`;
             return `
             <tr>
               <td>${m.peak_index}</td>
@@ -804,19 +903,30 @@
               <td>${Number(m.theoretical_mz).toFixed(4)}</td>
               <td>${Number(m.signed_error_ppm).toFixed(2)}</td>
               <td><strong>${Number(m.composite_heuristic_score).toFixed(1)}</strong></td>
-              <td>${m.isotope_score_idotp !== null && m.isotope_score_idotp !== undefined ? Number(m.isotope_score_idotp).toFixed(3) : `<small class="muted">N/A</small>`}</td>
+              <td>${idotpBtn}</td>
               <td>${ambigBadge}</td>
             </tr>
           `;
           })
           .join("");
+
+        tbody.querySelectorAll(".btn-idotp-plot").forEach((btn) => {
+          btn.addEventListener("click", () => {
+            openIsotopeComparison({
+              library_id: btn.getAttribute("data-lib-id"),
+              composition: btn.getAttribute("data-comp"),
+              adduct_code: btn.getAttribute("data-adduct"),
+            });
+          });
+        });
       }
 
       if (appState.spectrumSummary) {
         renderSpectrumSvg(appState.spectrumSummary.plot_peaks || appState.spectrumSummary.preview || [], topMatches);
         renderImportPeakTable();
       }
-      showAlert(`MS1 search completed: ${data.matched_peaks_count} of ${data.eligible_peaks_searched} peaks annotated.`);
+      const elapsedNote = data.elapsed_seconds !== undefined ? ` in ${(Number(data.elapsed_seconds) * 1000).toFixed(0)} ms` : "";
+      showAlert(`MS1 search completed${elapsedNote}: ${data.matched_peaks_count} of ${data.eligible_peaks_searched} peaks annotated.`);
     } catch (err) {
       showAlert(`MS1 search failed: ${err.message}`, true);
     }
@@ -1009,29 +1119,206 @@
       .join("");
   }
 
-  async function runCalibration() {
+  async function openIsotopeComparison({ library_id, composition, adduct_code }) {
     try {
       hideAlert();
-      const payload = {
-        model_type: document.getElementById("cal-model-type").value,
-        reference_set: document.getElementById("cal-reference-set").value,
-        match_tolerance_ppm: Number(document.getElementById("cal-tolerance-ppm").value),
-      };
+      const data = await apiRequest("/api/search/isotope", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          library_id: library_id || null,
+          composition: composition || null,
+          adduct_code: adduct_code || "[M+Na]+",
+          num_isotopes: 5,
+        }),
+      });
+      const panel = document.getElementById("isotope-comparison-panel");
+      if (!panel) return;
+      panel.classList.remove("hidden");
+      const titleEl = document.getElementById("isotope-panel-title");
+      if (titleEl) {
+        titleEl.textContent = `Isotope Envelope Comparison — ${data.composition} ${data.adduct_code} (${data.ion_formula || ""})`;
+      }
+      const metaEl = document.getElementById("isotope-panel-meta");
+      if (metaEl) {
+        const idotpStr =
+          data.idotp !== null && data.idotp !== undefined
+            ? `<span class="badge badge-pass">idotp = ${Number(data.idotp).toFixed(4)}</span>`
+            : `<span class="badge badge-warn">idotp = N/A (single peak / insufficient satellites)</span>`;
+        metaEl.innerHTML = `
+          <p><strong>Candidate:</strong> <code>${data.composition}</code> (${data.adduct_code}, z = ${data.charge}) | <strong>Monoisotopic m/z:</strong> ${Number(data.theoretical_mz).toFixed(4)} | <strong>Matched Isotopes:</strong> ${data.matched_isotope_peaks} / ${data.expected_isotope_peaks} | ${idotpStr}</p>
+          <p class="muted" style="margin:0;">${data.status_message} | Tolerance: &plusmn;${data.tolerance} ${data.tolerance_unit}</p>
+        `;
+      }
+
+      const tbody = document.querySelector("#table-isotope-envelope tbody");
+      if (tbody) {
+        tbody.innerHTML = (data.isotopologues || [])
+          .map((iso) => {
+            const obsMz = iso.observed_mz !== null && iso.observed_mz !== undefined ? Number(iso.observed_mz).toFixed(4) : '<span class="muted">Not detected</span>';
+            const errPpm = iso.error_ppm !== null && iso.error_ppm !== undefined ? `${Number(iso.error_ppm).toFixed(2)} ppm` : "—";
+            const dRatio =
+              iso.delta_base_ratio_pct !== null && iso.delta_base_ratio_pct !== undefined
+                ? `${Number(iso.delta_base_ratio_pct) >= 0 ? "+" : ""}${Number(iso.delta_base_ratio_pct).toFixed(1)}%`
+                : "—";
+            return `
+              <tr>
+                <td><strong>${iso.label}</strong></td>
+                <td>${Number(iso.theoretical_mz).toFixed(4)}</td>
+                <td>${obsMz}</td>
+                <td>${errPpm}</td>
+                <td>${Number(iso.theoretical_base_ratio_pct).toFixed(1)}%</td>
+                <td>${Number(iso.observed_base_ratio_pct).toFixed(1)}%</td>
+                <td>${dRatio}</td>
+              </tr>
+            `;
+          })
+          .join("");
+      }
+
+      renderIsotopeEnvelopeSvg(data);
+      panel.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    } catch (err) {
+      showAlert(`Could not load isotope envelope comparison: ${err.message}`, true);
+    }
+  }
+
+  function renderIsotopeEnvelopeSvg(data) {
+    const svg = document.getElementById("isotope-comparison-svg");
+    if (!svg) return;
+    const isos = data.isotopologues || [];
+    if (isos.length === 0) {
+      svg.innerHTML = "";
+      return;
+    }
+    const W = 640;
+    const H = 310;
+    const padL = 56;
+    const padR = 24;
+    const padT = 26;
+    const padB = 38;
+    const plotW = W - padL - padR;
+    const plotH = H - padT - padB;
+    const midY = padT + plotH * 0.52;
+    const topH = plotH * 0.46;
+    const botH = plotH * 0.42;
+
+    const minMz = Number(isos[0].theoretical_mz) - 0.65;
+    const maxMz = Number(isos[isos.length - 1].theoretical_mz) + 0.65;
+    const xOf = (mz) => padL + ((Number(mz) - minMz) / Math.max(0.1, maxMz - minMz)) * plotW;
+
+    const parts = [];
+    parts.push(`<rect x="${padL}" y="${padT}" width="${plotW}" height="${plotH}" fill="#f8fafc" stroke="#cbd5e1" rx="4"/>`);
+    parts.push(`<line x1="${padL}" y1="${midY}" x2="${W - padR}" y2="${midY}" stroke="#475569" stroke-width="1.2"/>`);
+    parts.push(`<text x="${padL + 6}" y="${padT + 14}" font-size="10" fill="#1e40af" font-weight="600">Upper: Side-by-Side Base Ratio (%) — Theoretical (Blue) vs. Experimental (Green)</text>`);
+    parts.push(`<text x="${padL + 6}" y="${midY + botH + 14}" font-size="10" fill="#047857" font-weight="600">Lower Mirror: Experimental Observed Envelope &amp; Local Spectrum Trace</text>`);
+
+    // Local raw spectrum trace in the mirror region if present
+    const trace = data.observed_trace || [];
+    if (trace.length > 1) {
+      const maxTraceInt = Math.max(...trace.map((p) => Number(p.intensity)), 1);
+      const pts = trace
+        .filter((p) => Number(p.mz) >= minMz && Number(p.mz) <= maxMz)
+        .map((p) => {
+          const x = xOf(p.mz).toFixed(1);
+          const y = (midY + (Number(p.intensity) / maxTraceInt) * botH).toFixed(1);
+          return `${x},${y}`;
+        });
+      if (pts.length > 1) {
+        parts.push(`<polyline fill="none" stroke="#94a3b8" stroke-width="1.1" opacity="0.65" points="${pts.join(" ")}"/>`);
+      }
+    }
+
+    const barW = Math.min(18, Math.max(8, plotW / (isos.length * 4.5)));
+    isos.forEach((iso) => {
+      const cx = xOf(iso.theoretical_mz);
+      const theoRatio = Math.max(0, Math.min(100, Number(iso.theoretical_base_ratio_pct || 0)));
+      const obsRatio = Math.max(0, Math.min(100, Number(iso.observed_base_ratio_pct || 0)));
+      const hTheo = (theoRatio / 100.0) * topH;
+      const hObs = (obsRatio / 100.0) * topH;
+      const hMirror = (obsRatio / 100.0) * botH;
+
+      // Upper side-by-side bars (Theoretical left, Observed right)
+      parts.push(`<rect x="${(cx - barW - 1).toFixed(1)}" y="${(midY - hTheo).toFixed(1)}" width="${barW}" height="${Math.max(1, hTheo).toFixed(1)}" fill="#2563eb" opacity="0.88" rx="2"><title>${iso.label} Theoretical: ${theoRatio.toFixed(1)}% (${Number(iso.theoretical_mz).toFixed(4)})</title></rect>`);
+      if (obsRatio > 0) {
+        parts.push(`<rect x="${(cx + 1).toFixed(1)}" y="${(midY - hObs).toFixed(1)}" width="${barW}" height="${Math.max(1, hObs).toFixed(1)}" fill="#059669" opacity="0.9" rx="2"><title>${iso.label} Experimental: ${obsRatio.toFixed(1)}% (${iso.observed_mz})</title></rect>`);
+        // Lower mirror stick for observed isotopologue
+        const ox = iso.observed_mz ? xOf(iso.observed_mz) : cx;
+        parts.push(`<line x1="${ox.toFixed(1)}" y1="${midY}" x2="${ox.toFixed(1)}" y2="${(midY + hMirror).toFixed(1)}" stroke="#059669" stroke-width="3"/>`);
+        parts.push(`<circle cx="${ox.toFixed(1)}" cy="${(midY + hMirror).toFixed(1)}" r="3.5" fill="#059669"/>`);
+      } else {
+        parts.push(`<line x1="${(cx + 1).toFixed(1)}" y1="${midY - 4}" x2="${(cx + 1 + barW).toFixed(1)}" y2="${midY - 4}" stroke="#ef4444" stroke-width="1.5" stroke-dasharray="2,2"/>`);
+      }
+
+      // Label above bar pair
+      const topY = midY - Math.max(hTheo, hObs) - 5;
+      parts.push(`<text x="${cx.toFixed(1)}" y="${Math.max(padT + 24, topY).toFixed(1)}" text-anchor="middle" font-size="10" font-weight="600" fill="#1e293b">${iso.label}</text>`);
+      // m/z tick at bottom
+      parts.push(`<text x="${cx.toFixed(1)}" y="${H - 12}" text-anchor="middle" font-size="10" fill="#475569">${Number(iso.theoretical_mz).toFixed(2)}</text>`);
+    });
+
+    svg.innerHTML = parts.join("");
+  }
+
+  function renderCalibrationSummaryBoxes(data) {
+    const html = `
+      <p><strong>Applied:</strong> ${data.applied ? '<span class="badge badge-pass">YES</span>' : '<span class="badge badge-warn">NO (Uncalibrated)</span>'} | <strong>Model:</strong> ${data.model_type} | <strong>Panel:</strong> <code>${data.reference_set || "nglycan_na"}</code></p>
+      <p><strong>Matched Calibrants:</strong> ${data.matched_calibrants_count} | <strong>RMS ppm (Before &rarr; After):</strong> ${data.rms_ppm_before !== null ? Number(data.rms_ppm_before).toFixed(3) : "—"} &rarr; <strong>${data.rms_ppm_after !== null ? Number(data.rms_ppm_after).toFixed(3) : "—"} ppm</strong></p>
+      ${data.warnings && data.warnings.length ? `<p class="muted">${data.warnings.join("; ")}</p>` : ""}
+    `;
+    ["calibration-result-box", "import-calibration-box"].forEach((id) => {
+      const box = document.getElementById(id);
+      if (box) box.innerHTML = html;
+    });
+    updateCalibrationStatusBanner(data);
+  }
+
+  async function runCalibration(source = "qc") {
+    try {
+      hideAlert();
+      const useImport = source === "import";
+      const model_type = document.getElementById(useImport ? "import-cal-model" : "cal-model-type")?.value || "linear";
+      const reference_set = document.getElementById(useImport ? "import-cal-panel" : "cal-reference-set")?.value || "auto";
+      const match_tolerance_ppm = Number(
+        document.getElementById(useImport ? "import-cal-tol" : "cal-tolerance-ppm")?.value || 150.0
+      );
+      const payload = { model_type, reference_set, match_tolerance_ppm };
       const data = await apiRequest("/api/qc/calibrate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
       appState.calibrationResult = data;
-      const box = document.getElementById("calibration-result-box");
-      box.innerHTML = `
-        <p><strong>Applied:</strong> ${data.applied ? '<span class="badge badge-pass">YES</span>' : '<span class="badge badge-warn">NO (Uncalibrated)</span>'} | <strong>Model:</strong> ${data.model_type}</p>
-        <p><strong>Matched Calibrants:</strong> ${data.matched_calibrants_count} | <strong>RMS ppm (Before &rarr; After):</strong> ${data.rms_ppm_before !== null ? Number(data.rms_ppm_before).toFixed(3) : "—"} &rarr; ${data.rms_ppm_after !== null ? Number(data.rms_ppm_after).toFixed(3) : "—"} ppm</p>
-        ${data.warnings && data.warnings.length ? `<p class="muted">${data.warnings.join("; ")}</p>` : ""}
-      `;
-      showAlert(data.applied ? "Mass calibration applied successfully." : "Calibration safeguard triggered; spectrum left uncalibrated.");
+      renderCalibrationSummaryBoxes(data);
+      if (data.reference_set === "nglycan_neg") {
+        syncPolarityAdducts("negative");
+      } else if (data.reference_set && data.reference_set !== "auto") {
+        syncPolarityAdducts("positive");
+      }
+      showAlert(
+        data.applied
+          ? `Mass calibration applied (${data.matched_calibrants_count} calibrants, RMS ${Number(data.rms_ppm_before).toFixed(1)} → ${Number(data.rms_ppm_after).toFixed(2)} ppm).`
+          : "Calibration safeguard triggered; spectrum left uncalibrated."
+      );
+      return data;
     } catch (err) {
       showAlert(`Mass calibration failed: ${err.message}`, true);
+      return null;
+    }
+  }
+
+  async function resetCalibration() {
+    try {
+      await apiRequest("/api/qc/calibrate/reset", { method: "POST" });
+      appState.calibrationResult = null;
+      ["calibration-result-box", "import-calibration-box"].forEach((id) => {
+        const box = document.getElementById(id);
+        if (box) box.innerHTML = `<p class="muted">Calibration removed; spectrum is uncalibrated.</p>`;
+      });
+      updateCalibrationStatusBanner(null);
+      showAlert("Calibration reset; active spectrum restored to uncalibrated m/z axis.");
+    } catch (err) {
+      showAlert(`Failed to reset calibration: ${err.message}`, true);
     }
   }
 
@@ -1166,6 +1453,29 @@
     document.getElementById("btn-load-synthetic-csv")?.addEventListener("click", () => loadSyntheticExample("csv", false));
     document.getElementById("btn-load-synthetic-txt")?.addEventListener("click", () => loadSyntheticExample("txt", false));
     document.getElementById("btn-load-synthetic-xy")?.addEventListener("click", () => loadSyntheticExample("xy", false));
+    document.getElementById("btn-load-complex-pos")?.addEventListener("click", () => loadSyntheticExample("complex_pos", false));
+    document.getElementById("btn-load-complex-neg")?.addEventListener("click", () => loadSyntheticExample("complex_neg", false));
+
+    document.getElementById("btn-apply-corrections")?.addEventListener("click", () => applySpectrumCorrections(false));
+    document.getElementById("btn-reset-corrections")?.addEventListener("click", () => applySpectrumCorrections(true));
+    document.getElementById("btn-import-calibrate")?.addEventListener("click", () => runCalibration("import"));
+    document.getElementById("btn-import-reset-calibration")?.addEventListener("click", resetCalibration);
+    document.getElementById("btn-reset-calibration")?.addEventListener("click", resetCalibration);
+    document.getElementById("btn-calibrate-and-search")?.addEventListener("click", async () => {
+      await runCalibration("import");
+      switchView("search");
+      await executeMS1Search();
+    });
+    document.getElementById("btn-search-calibrate-first")?.addEventListener("click", async () => {
+      await runCalibration("import");
+      await executeMS1Search();
+    });
+    document.getElementById("search-polarity")?.addEventListener("change", (e) => {
+      syncPolarityAdducts(e.target.value);
+    });
+    document.getElementById("btn-close-isotope-panel")?.addEventListener("click", () => {
+      document.getElementById("isotope-comparison-panel")?.classList.add("hidden");
+    });
 
     // Interactive Spectrum Viewer Toolbar controls
     const redrawCurrentSpectrum = () => {
@@ -1197,7 +1507,7 @@
     document.getElementById("btn-run-batch-upload")?.addEventListener("click", runUploadBatch);
     document.getElementById("btn-run-demo-batch")?.addEventListener("click", runDemoBatch);
     document.getElementById("btn-run-quantification")?.addEventListener("click", runQuantification);
-    document.getElementById("btn-run-calibration")?.addEventListener("click", runCalibration);
+    document.getElementById("btn-run-calibration")?.addEventListener("click", () => runCalibration("qc"));
     document.getElementById("btn-evaluate-qc")?.addEventListener("click", evaluateSpectrumQC);
     document.getElementById("btn-run-demo-statistics")?.addEventListener("click", runCohortStatisticsDemo);
 

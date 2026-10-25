@@ -409,6 +409,8 @@ class ClientResponse:
 class TestClient:
     """In-memory synchronous test client for `FastAPI` applications."""
 
+    __test__ = False
+
     def __init__(self, app: FastAPI) -> None:
         self.app = app
 

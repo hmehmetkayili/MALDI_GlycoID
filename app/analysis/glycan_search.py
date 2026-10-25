@@ -16,17 +16,23 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple, Union
 
+import numpy as np
+
 from app.analysis.peak_processing import (
     PeakPreprocessingConfig,
     ProcessedSpectrumResult,
     preprocess_spectrum,
 )
+from app.analysis.spectrum_corrections import find_isotope_satellite_indices
 from app.core.ion_calculator import (
     build_homogeneous_adduct_for_charge,
     calculate_mz_from_neutral_mass,
     resolve_adduct_definition,
 )
-from app.core.isotope_scoring import calculate_isotope_dot_product
+from app.core.isotope_scoring import (
+    generate_theoretical_isotope_envelope,
+    score_envelope_against_peaks,
+)
 from app.core.mass_calculator import (
     calculate_released_glycan_mass,
     format_glycan_composition,
@@ -104,6 +110,12 @@ class MS1SearchSettings:
     candidate_limit_per_peak: int = 10
     enable_isotope_scoring: bool = True
     preprocessing: PeakPreprocessingConfig = field(default_factory=PeakPreprocessingConfig)
+    # --- match-quality filters (all optional; 0 / False = disabled) ---
+    min_snr: float = 0.0  # drop peaks below this S/N (instrument S/N, else local-median estimate)
+    min_score: float = 0.0  # drop candidates whose composite heuristic score is below this (0-100)
+    min_idotp: float = 0.0  # drop candidates whose AVAILABLE idotp is below this (0-1)
+    require_isotope_support: bool = False  # drop candidates without a computable idotp
+    exclude_isotope_satellites: bool = False  # do not annotate M+1/M+2 satellites as separate species
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -118,7 +130,30 @@ class MS1SearchSettings:
             "min_relative_intensity_pct": self.min_relative_intensity_pct,
             "candidate_limit_per_peak": self.candidate_limit_per_peak,
             "enable_isotope_scoring": self.enable_isotope_scoring,
+            "min_snr": self.min_snr,
+            "min_score": self.min_score,
+            "min_idotp": self.min_idotp,
+            "require_isotope_support": self.require_isotope_support,
+            "exclude_isotope_satellites": self.exclude_isotope_satellites,
         }
+
+
+def build_preprocessing_config(settings: "MS1SearchSettings") -> PeakPreprocessingConfig:
+    """Merge search-level thresholds with the nested `PeakPreprocessingConfig`."""
+    pre = settings.preprocessing
+    snr_candidates = [v for v in (settings.min_snr, pre.min_snr) if v is not None and v > 0]
+    return PeakPreprocessingConfig(
+        min_intensity=max(settings.min_intensity, pre.min_intensity),
+        min_relative_intensity_pct=max(settings.min_relative_intensity_pct, pre.min_relative_intensity_pct),
+        min_mz=pre.min_mz,
+        max_mz=pre.max_mz,
+        min_snr=max(snr_candidates) if snr_candidates else None,
+        apply_profile_baseline_subtraction=pre.apply_profile_baseline_subtraction,
+        apply_profile_peak_detection=pre.apply_profile_peak_detection,
+        integrate_profile_peak_area=pre.integrate_profile_peak_area,
+        baseline_window_points=pre.baseline_window_points,
+        baseline_percentile=pre.baseline_percentile,
+    )
 
 
 @dataclass(frozen=True)
@@ -306,7 +341,40 @@ def _expand_adduct_charge_pairs(
     return pairs
 
 
+_ION_CACHE_MAX = 8
+_ION_CACHE: "Dict[Tuple[Any, ...], Tuple[GlycanLibrary, List[_TheoreticalIonCandidate]]]" = {}
+
+
 def _build_library_theoretical_ions(
+    library: GlycanLibrary,
+    settings: MS1SearchSettings,
+) -> List[_TheoreticalIonCandidate]:
+    """Cached wrapper: theoretical ions only depend on the library and adduct/charge/label settings.
+
+    Re-running a search (e.g. after tolerance / S/N / calibration changes) therefore skips the
+    expensive per-entry mass + formula computation.
+    """
+    if library.library_name == "Targeted Subset":
+        return _build_library_theoretical_ions_uncached(library, settings)
+    key = (
+        id(library),
+        library.entry_count,
+        tuple(settings.adduct_codes),
+        tuple(settings.charge_states),
+        settings.polarity.value,
+        settings.labeling.upper().strip(),
+    )
+    hit = _ION_CACHE.get(key)
+    if hit is not None and hit[0] is library:
+        return hit[1]
+    ions = _build_library_theoretical_ions_uncached(library, settings)
+    if len(_ION_CACHE) >= _ION_CACHE_MAX:
+        _ION_CACHE.pop(next(iter(_ION_CACHE)))
+    _ION_CACHE[key] = (library, ions)
+    return ions
+
+
+def _build_library_theoretical_ions_uncached(
     library: GlycanLibrary,
     settings: MS1SearchSettings,
 ) -> List[_TheoreticalIonCandidate]:
@@ -537,27 +605,38 @@ def _execute_matching_core(
     if not val_rep.is_valid:
         raise ValueError(f"Invalid MS1 search parameters: {'; '.join(val_rep.errors)}")
 
-    # Sync PeakPreprocessingConfig thresholds with search settings
-    prep_cfg = PeakPreprocessingConfig(
-        min_intensity=max(settings.min_intensity, settings.preprocessing.min_intensity),
-        min_relative_intensity_pct=max(
-            settings.min_relative_intensity_pct,
-            settings.preprocessing.min_relative_intensity_pct,
-        ),
-        min_mz=settings.preprocessing.min_mz,
-        max_mz=settings.preprocessing.max_mz,
-        min_snr=settings.preprocessing.min_snr,
-        apply_profile_baseline_subtraction=settings.preprocessing.apply_profile_baseline_subtraction,
-        apply_profile_peak_detection=settings.preprocessing.apply_profile_peak_detection,
-        integrate_profile_peak_area=settings.preprocessing.integrate_profile_peak_area,
-        baseline_window_points=settings.preprocessing.baseline_window_points,
-        baseline_percentile=settings.preprocessing.baseline_percentile,
-    )
+    # Sync PeakPreprocessingConfig thresholds (incl. S/N) with search settings
+    prep_cfg = build_preprocessing_config(settings)
     proc: ProcessedSpectrumResult = preprocess_spectrum(spectrum, config=prep_cfg)
     warnings: List[str] = list(val_rep.warnings) + list(proc.warnings)
 
-    all_spectrum_mzs = [p.mz for p in proc.eligible_peaks]
-    all_spectrum_ints = [p.intensity for p in proc.eligible_peaks]
+    # Isotope scoring pool: all peaks that passed m/z + S/N filters (sorted by m/z), so that weak
+    # M+1/M+2 satellites are available even when the relative-intensity cut removed them from annotation.
+    pool_peaks = sorted(proc.isotope_pool_peaks or proc.eligible_peaks, key=lambda pk: pk.mz)
+    pool_mz = np.array([p.mz for p in pool_peaks], dtype=float)
+    pool_int = np.array([p.intensity for p in pool_peaks], dtype=float)
+
+    # Optionally skip peaks that are M+1/M+2 satellites of a lower peak for annotation purposes.
+    satellite_peak_ids: set = set()
+    if settings.exclude_isotope_satellites and len(proc.eligible_peaks) > 1:
+        e_mz = np.array([p.mz for p in proc.eligible_peaks], dtype=float)
+        e_int = np.array([p.intensity for p in proc.eligible_peaks], dtype=float)
+        tol_ppm = settings.tolerance if settings.tolerance_unit == MassToleranceUnit.PPM else 25.0
+        charges = tuple(sorted({abs(int(z)) for z in settings.charge_states} | {1}))
+        # Satellites are identified among eligible peaks; they remain in the isotope pool for idotp
+        sat_idx = find_isotope_satellite_indices(e_mz, e_int, tolerance_ppm=tol_ppm, charges=charges)
+        satellite_peak_ids = {id(proc.eligible_peaks[i]) for i in sat_idx}
+        if satellite_peak_ids:
+            warnings.append(
+                f"{len(satellite_peak_ids)} peaks were treated as isotope satellites (M+1/M+2) and not annotated separately."
+            )
+
+    # Theoretical ions sorted by m/z for O(log n) window lookup per observed peak
+    ion_order = sorted(range(len(theoretical_ions)), key=lambda k: theoretical_ions[k].theoretical_mz)
+    ion_mz_sorted = np.array([theoretical_ions[k].theoretical_mz for k in ion_order], dtype=float)
+    envelope_cache: Dict[int, Tuple[Any, ...]] = {}
+    use_ppm = settings.tolerance_unit == MassToleranceUnit.PPM
+    n_isotopes = 4
 
     all_matches: List[MS1CandidateMatch] = []
     top_matches: List[MS1CandidateMatch] = []
@@ -567,9 +646,22 @@ def _execute_matching_core(
     for p_idx, (peak, rel_int_pct) in enumerate(
         zip(proc.eligible_peaks, proc.relative_intensities_pct), start=1
     ):
+        if id(peak) in satellite_peak_ids:
+            continue
+
         raw_hits: List[Tuple[_TheoreticalIonCandidate, Any, Any, ScoringBreakdown]] = []
 
-        for cand in theoretical_ions:
+        # Binary-search window around the observed m/z (padded 1.5x; exact test follows)
+        if use_ppm:
+            half_w = peak.mz * settings.tolerance * 1e-6 * 1.5 + 1e-9
+        else:
+            half_w = settings.tolerance * 1.5 + 1e-9
+        lo = int(np.searchsorted(ion_mz_sorted, peak.mz - half_w, side="left"))
+        hi = int(np.searchsorted(ion_mz_sorted, peak.mz + half_w, side="right"))
+        cand_indices = sorted(ion_order[lo:hi])  # restore original (deterministic) ordering
+
+        for cand_idx in cand_indices:
+            cand = theoretical_ions[cand_idx]
             if not is_within_mass_tolerance(
                 observed=peak.mz,
                 theoretical=cand.theoretical_mz,
@@ -580,21 +672,34 @@ def _execute_matching_core(
 
             err = evaluate_mass_error(observed=peak.mz, theoretical=cand.theoretical_mz)
 
-            # Evaluate optional isotope envelope similarity (idotp)
+            # Evaluate optional isotope envelope similarity (idotp); envelopes are cached per candidate
+            iso_res = None
             if settings.enable_isotope_scoring and cand.ion_formula is not None:
-                iso_res = calculate_isotope_dot_product(
-                    observed_mzs=all_spectrum_mzs,
-                    observed_intensities=all_spectrum_ints,
-                    ion_formula=cand.ion_formula,
-                    monoisotopic_mz=cand.theoretical_mz,
-                    charge=cand.charge,
+                env = envelope_cache.get(cand_idx)
+                if env is None:
+                    env = generate_theoretical_isotope_envelope(
+                        ion_formula=cand.ion_formula,
+                        monoisotopic_mz=cand.theoretical_mz,
+                        charge=cand.charge,
+                        num_peaks=n_isotopes,
+                    )
+                    envelope_cache[cand_idx] = env
+                iso_res = score_envelope_against_peaks(
+                    theo_envelope=env,
+                    obs_mz_sorted=pool_mz,
+                    obs_int_sorted=pool_int,
                     tolerance=settings.tolerance,
                     tolerance_unit=settings.tolerance_unit,
                 )
-            else:
-                iso_res = None
 
             idotp_val = iso_res.idotp if (iso_res and iso_res.available) else None
+
+            # --- optional isotope-based quality filters ---
+            if settings.require_isotope_support and idotp_val is None:
+                continue
+            if settings.min_idotp > 0 and idotp_val is not None and idotp_val < settings.min_idotp:
+                continue
+
             abs_err_metric = (
                 err.abs_error_ppm
                 if settings.tolerance_unit == MassToleranceUnit.PPM
@@ -606,7 +711,10 @@ def _execute_matching_core(
                 relative_intensity_pct=rel_int_pct,
                 idotp=idotp_val,
             )
+            if settings.min_score > 0 and breakdown.composite_heuristic_score < settings.min_score:
+                continue
             raw_hits.append((cand, err, iso_res, breakdown))
+
 
         if not raw_hits:
             unmatched_peaks.append(peak)

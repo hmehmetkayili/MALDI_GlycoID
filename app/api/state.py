@@ -22,6 +22,7 @@ from app.analysis.statistics import (
     SampleDerivedTraitsReport,
     compute_derived_glycan_traits,
 )
+from app.analysis.spectrum_corrections import CorrectionResult
 from app.config import EXAMPLES_DIR, LIBRARIES_DIR
 from app.core.calibration import MassCalibrationResult
 from app.libraries.composition_generator import GlycanLibrary, generate_human_n_glycan_library
@@ -36,6 +37,9 @@ class AnalyticalSessionState:
 
     active_library: Optional[GlycanLibrary] = None
     active_spectrum: Optional[SpectrumData] = None
+    original_spectrum: Optional[SpectrumData] = None  # as imported
+    base_spectrum: Optional[SpectrumData] = None  # after optional corrections, before calibration
+    correction_result: Optional[CorrectionResult] = None
     ms1_search_result: Optional[MS1SearchResult] = None
     quantification_result: Optional[SampleQuantificationResult] = None
     derived_traits_report: Optional[SampleDerivedTraitsReport] = None
@@ -72,8 +76,53 @@ class AnalyticalSessionState:
             return self.active_spectrum
 
         default_csv = EXAMPLES_DIR / "synthetic_native_nglycans.csv"
-        self.active_spectrum = parse_spectrum_file(default_csv, sample_id="SYNTH_NATIVE_01")
+        self.set_imported_spectrum(parse_spectrum_file(default_csv, sample_id="SYNTH_NATIVE_01"))
         return self.active_spectrum
+
+    # ------------------------------------------------------------------ #
+    # Spectrum lifecycle: import -> (optional corrections) -> (optional calibration) -> search
+    # ------------------------------------------------------------------ #
+    def invalidate_results(self) -> None:
+        """Drop every downstream result that depends on the active spectrum."""
+        self.ms1_search_result = None
+        self.quantification_result = None
+        self.derived_traits_report = None
+        self.spectrum_qc_report = None
+
+    def set_imported_spectrum(self, spectrum: SpectrumData) -> None:
+        """Register a freshly imported spectrum and reset the whole processing chain."""
+        self.original_spectrum = spectrum
+        self.base_spectrum = spectrum
+        self.active_spectrum = spectrum
+        self.correction_result = None
+        self.calibration_result = None
+        self.invalidate_results()
+
+    def set_processed_spectrum(self, spectrum: SpectrumData, correction: Optional[CorrectionResult]) -> None:
+        """Store the corrected (pre-calibration) spectrum; calibration must be re-run afterwards."""
+        self.base_spectrum = spectrum
+        self.active_spectrum = spectrum
+        self.correction_result = correction
+        self.calibration_result = None
+        self.invalidate_results()
+
+    def set_calibration(self, result: MassCalibrationResult) -> None:
+        """Store a calibration result; the calibrated spectrum becomes active when it was applied."""
+        self.calibration_result = result
+        self.active_spectrum = result.calibrated_spectrum if result.applied else self.base_spectrum
+        self.invalidate_results()
+
+    def reset_calibration(self) -> None:
+        """Undo calibration (back to the corrected/imported spectrum)."""
+        self.calibration_result = None
+        if self.base_spectrum is not None:
+            self.active_spectrum = self.base_spectrum
+        self.invalidate_results()
+
+    def get_base_spectrum(self) -> SpectrumData:
+        """Spectrum to calibrate: always the uncalibrated base, so repeated calibration never compounds."""
+        self.get_or_load_spectrum()
+        return self.base_spectrum if self.base_spectrum is not None else self.active_spectrum
 
     def ensure_baseline_analysis(self) -> None:
         """Ensure MS1 search, quantification, derived traits, and QC have been computed on active spectrum."""

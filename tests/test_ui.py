@@ -77,6 +77,38 @@ class TestUserInterfaceAndWorkflow(unittest.TestCase):
         self.assertIn(".dropzone", self.css_text)
         self.assertIn("@media (max-width: 900px)", self.css_text)
 
+    def test_negative_library_columns_snr_calibration_and_idotp_plot_ui(self) -> None:
+        """Verify negative-mode library m/z headers, S/N & MALDI correction controls, pre-search calibration, and idotp plot."""
+        # Negative-mode library m/z columns
+        self.assertIn("[M-H]&minus; (m/z)", self.html_text)
+        self.assertIn("[M+Cl]&minus; (m/z)", self.html_text)
+        self.assertIn("[M-2H]2&minus; (m/z)", self.html_text)
+        self.assertIn("negative_mode_mz", self.js_text)
+
+        # S/N filtering, MALDI corrections, and pre-search calibration controls
+        for elem_id in (
+            "import-min-snr",
+            "corr-min-snr",
+            "corr-smoothing",
+            "corr-baseline",
+            "corr-pick-peaks",
+            "corr-remove-matrix",
+            "btn-apply-corrections",
+            "btn-import-calibrate",
+            "btn-calibrate-and-search",
+            "search-min-snr",
+            "search-min-score",
+            "search-min-idotp",
+            "search-exclude-satellites",
+            "isotope-comparison-panel",
+            "isotope-comparison-svg",
+            "table-isotope-envelope",
+        ):
+            self.assertIn(f'id="{elem_id}"', self.html_text)
+
+        for js_ep in ("/api/spectra/process", "/api/search/isotope", "/api/qc/calibrate/reset", "openIsotopeComparison"):
+            self.assertIn(js_ep, self.js_text)
+
 
 if __name__ == "__main__":
     unittest.main()

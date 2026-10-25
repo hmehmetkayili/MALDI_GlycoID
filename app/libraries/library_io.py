@@ -42,6 +42,14 @@ DEFAULT_EXPORT_ADDUCTS: Tuple[str, ...] = (
 )
 
 
+def _neg_mz(entry: GlycanLibraryEntry, adduct_code: str) -> float:
+    """Negative-mode m/z of an entry: precomputed value if present, else computed from the neutral mass."""
+    mz = entry.adduct_mzs.get(adduct_code)
+    if mz is not None and mz > 0:
+        return float(mz)
+    return float(calculate_mz_from_neutral_mass(entry.theoretical_neutral_mass, adduct_code).theoretical_mz)
+
+
 def export_library_to_json(
     library: GlycanLibrary,
     output_path: Optional[Path] = None,
@@ -94,6 +102,8 @@ def export_library_to_delimited(
         "mz_M_plus_2H_2pos",
         "mz_M_plus_2Na_2pos",
         "mz_M_minus_H_1neg",
+        "mz_M_plus_Cl_1neg",
+        "mz_M_minus_2H_2neg",
         "labeling",
         "default_charge",
         "structural_annotation_status",
@@ -131,7 +141,9 @@ def export_library_to_delimited(
                 "mz_M_plus_K_1pos": f"{e.adduct_mzs.get('[M+K]+', 0.0):.8f}",
                 "mz_M_plus_2H_2pos": f"{e.adduct_mzs.get('[M+2H]2+', 0.0):.8f}",
                 "mz_M_plus_2Na_2pos": f"{e.adduct_mzs.get('[M+2Na]2+', 0.0):.8f}",
-                "mz_M_minus_H_1neg": f"{e.adduct_mzs.get('[M-H]-', 0.0):.8f}",
+                "mz_M_minus_H_1neg": f"{_neg_mz(e, '[M-H]-'):.8f}",
+                "mz_M_plus_Cl_1neg": f"{_neg_mz(e, '[M+Cl]-'):.8f}",
+                "mz_M_minus_2H_2neg": f"{_neg_mz(e, '[M-2H]2-'):.8f}",
                 "labeling": e.labeling,
                 "default_charge": e.default_charge,
                 "structural_annotation_status": e.structural_annotation_status.value,

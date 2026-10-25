@@ -206,6 +206,10 @@
                   <option value="keep_all">Keep All</option>
                 </select>
               </div>
+              <div class="form-group">
+                <label for="import-min-snr">Import S/N Filter (min S/N, optional)</label>
+                <input type="number" id="import-min-snr" min="0" step="0.5" placeholder="e.g. 5 (blank = keep all)" />
+              </div>
             </div>
 
             <div class="button-row">
@@ -213,6 +217,8 @@
               <button type="button" class="btn btn-secondary" id="btn-load-synthetic-txt">Load Synthetic TXT Example</button>
               <button type="button" class="btn btn-outline" id="btn-load-synthetic-csv">Load Synthetic CSV Example</button>
               <button type="button" class="btn btn-outline" id="btn-load-synthetic-xy">Load Synthetic XY Example</button>
+              <button type="button" class="btn btn-outline" id="btn-load-complex-pos">Load Complex Profile (+ Mode, Miscalibrated)</button>
+              <button type="button" class="btn btn-outline" id="btn-load-complex-neg">Load Complex Profile (&minus; Mode, Miscalibrated)</button>
             </div>
           </div>
 
@@ -260,6 +266,95 @@
                 <span class="muted" id="raw-txt-meta-note">Showing header, comments &amp; initial data rows</span>
               </div>
               <pre id="raw-txt-code" class="raw-txt-code"></pre>
+            </div>
+          </div>
+        </div>
+
+        <div class="card-grid-2">
+          <div class="panel">
+            <h3>Optional MALDI-TOF Spectrum Corrections &amp; S/N Filtering</h3>
+            <p class="info-note">
+              <strong>Opt-In Processing:</strong> Applied on the imported spectrum (re-running resets from raw imported data so steps never compound). Profile-only steps (smoothing, SNIP baseline, peak picking) are skipped with a warning on centroid peak lists.
+            </p>
+            <div class="form-grid">
+              <div class="form-group">
+                <label for="corr-min-snr">Min Peak S/N Threshold</label>
+                <input type="number" id="corr-min-snr" min="0" step="0.5" placeholder="e.g. 5.0 (blank = off)" />
+              </div>
+              <div class="form-group">
+                <label for="corr-min-rel-int">Min Relative Intensity (%)</label>
+                <input type="number" id="corr-min-rel-int" value="0" min="0" max="100" step="0.5" />
+              </div>
+              <div class="form-group">
+                <label for="corr-min-mz">m/z Trim Range (Min &ndash; Max Da)</label>
+                <div class="inline-pair">
+                  <input type="number" id="corr-min-mz" placeholder="Min m/z (e.g. 850)" step="10" />
+                  <input type="number" id="corr-max-mz" placeholder="Max m/z (e.g. 3800)" step="10" />
+                </div>
+              </div>
+              <div class="form-group">
+                <label for="corr-normalize">Intensity Normalization</label>
+                <select id="corr-normalize">
+                  <option value="">None (Raw Counts)</option>
+                  <option value="base_peak">Base Peak = 100%</option>
+                  <option value="tic">Total Ion Current (TIC) = 100</option>
+                  <option value="median">Median Peak = 1.0</option>
+                </select>
+              </div>
+              <div class="form-group checkbox-group">
+                <label><input type="checkbox" id="corr-smoothing" /> Savitzky-Golay Smoothing (Profile)</label>
+                <label><input type="checkbox" id="corr-baseline" /> SNIP Baseline Subtraction (Profile)</label>
+                <label><input type="checkbox" id="corr-pick-peaks" /> Profile Peak Picking / Centroiding (min S/N = 5)</label>
+              </div>
+              <div class="form-group checkbox-group">
+                <label><input type="checkbox" id="corr-remove-matrix" /> Exclude MALDI Matrix Ions (DHB/CHCA/SA/DHAP)</label>
+                <label><input type="checkbox" id="corr-merge-close" /> Merge Split Centroids (&le; 20 ppm)</label>
+              </div>
+            </div>
+            <div class="button-row">
+              <button type="button" class="btn btn-primary" id="btn-apply-corrections">Apply Selected MALDI Corrections</button>
+              <button type="button" class="btn btn-outline" id="btn-reset-corrections">Reset to Raw Imported Spectrum</button>
+            </div>
+            <div id="corrections-result-box" class="summary-box">
+              <p class="muted">No optional MALDI corrections applied yet.</p>
+            </div>
+          </div>
+
+          <div class="panel">
+            <h3>Step 2 &mdash; Pre-Search Mass Calibration (Before MS1 Matching)</h3>
+            <p class="info-note">
+              <strong>Recommended Workflow:</strong> Perform internal/reference mass calibration on the imported (and optionally corrected) spectrum <em>before</em> running MS1 glycan search &amp; matching.
+            </p>
+            <div class="form-grid">
+              <div class="form-group">
+                <label for="import-cal-model">Polynomial Model</label>
+                <select id="import-cal-model">
+                  <option value="linear">Linear Least-Squares (mz_cal = a·mz + b)</option>
+                  <option value="quadratic">Quadratic Least-Squares (mz_cal = a·mz² + b·mz + c)</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="import-cal-panel">Reference Calibrant Panel</label>
+                <select id="import-cal-panel">
+                  <option value="auto">Auto-Select Best Panel (+ / &minus; Mode)</option>
+                  <option value="nglycan_na">Canonical Human N-Glycans [M+Na]+ (+)</option>
+                  <option value="nglycan_neg">Canonical Human N-Glycans [M-H]&minus; (&minus;)</option>
+                  <option value="nglycan_h">Canonical Human N-Glycans [M+H]+ (+)</option>
+                  <option value="peptide_h">MALDI Peptide Calibration Standard [M+H]+ (+)</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="import-cal-tol">Calibrant Match Window (ppm)</label>
+                <input type="number" id="import-cal-tol" value="150.0" min="5" step="5" />
+              </div>
+            </div>
+            <div class="button-row">
+              <button type="button" class="btn btn-primary" id="btn-import-calibrate">Calibrate Imported Spectrum</button>
+              <button type="button" class="btn btn-secondary" id="btn-calibrate-and-search">Calibrate &amp; Run MS1 Search &rarr;</button>
+              <button type="button" class="btn btn-outline" id="btn-import-reset-calibration">Undo Calibration</button>
+            </div>
+            <div id="import-calibration-box" class="summary-box">
+              <p class="muted">Spectrum is currently uncalibrated. Calibrate before running MS1 search for optimal mass accuracy.</p>
             </div>
           </div>
         </div>
@@ -407,11 +502,14 @@
                   <th>[M+Na]+ (m/z)</th>
                   <th>[M+H]+ (m/z)</th>
                   <th>[M+K]+ (m/z)</th>
+                  <th title="Negative ion mode deprotonated">[M-H]&minus; (m/z)</th>
+                  <th title="Negative ion mode chloride adduct">[M+Cl]&minus; (m/z)</th>
+                  <th title="Negative ion mode doubly deprotonated">[M-2H]2&minus; (m/z)</th>
                   <th>Annotation Status</th>
                 </tr>
               </thead>
               <tbody>
-                <tr><td colspan="9" class="muted">Loading library entries...</td></tr>
+                <tr><td colspan="12" class="muted">Loading library entries...</td></tr>
               </tbody>
             </table>
           </div>
@@ -428,7 +526,10 @@
         </div>
 
         <div class="panel">
-          <h3>MS1 Search Parameters</h3>
+          <h3>MS1 Search Parameters &amp; Match-Quality Filters</h3>
+          <div id="search-calibration-status-bar" class="info-note" style="margin-bottom:12px;">
+            <strong>Workflow Check (Calibration &rarr; MS1 Search):</strong> <span id="search-cal-status-text">Spectrum is currently uncalibrated. You can calibrate it in Import Data / QC or click "Calibrate Before Search" below.</span>
+          </div>
           <div class="form-grid-4">
             <div class="form-group">
               <label for="search-mode">Search Mode</label>
@@ -481,19 +582,36 @@
               <input type="number" id="search-min-rel-int" value="0.0" min="0" max="100" step="0.5" />
             </div>
             <div class="form-group">
+              <label for="search-min-snr">Min Peak S/N Ratio (SNR)</label>
+              <input type="number" id="search-min-snr" value="0.0" min="0" step="0.5" title="Minimum signal-to-noise ratio for MS1 peaks" />
+            </div>
+            <div class="form-group">
+              <label for="search-min-score">Min Heuristic Score (0&ndash;100)</label>
+              <input type="number" id="search-min-score" value="0.0" min="0" max="100" step="1" />
+            </div>
+            <div class="form-group">
+              <label for="search-min-idotp">Min Isotope Similarity (<code>idotp</code> 0&ndash;1)</label>
+              <input type="number" id="search-min-idotp" value="0.0" min="0" max="1" step="0.05" />
+            </div>
+            <div class="form-group">
               <label for="search-targeted-query">Mode A Targets (if Mode A selected)</label>
               <input type="text" id="search-targeted-query" placeholder="e.g., Hex5HexNAc2, Hex3HexNAc4dHex1" />
+            </div>
+            <div class="form-group checkbox-group">
+              <label><input type="checkbox" id="search-exclude-satellites" /> Exclude [M+1]/[M+2] Satellites from Separate Annotation</label>
+              <label><input type="checkbox" id="search-require-isotope" /> Require Isotope Envelope Support (<code>idotp</code> available)</label>
             </div>
           </div>
           <div class="button-row">
             <button type="button" class="btn btn-primary" id="btn-execute-ms1-search">Execute MS1 Glycan Search</button>
+            <button type="button" class="btn btn-secondary" id="btn-search-calibrate-first">Calibrate Spectrum First, Then Search</button>
           </div>
         </div>
 
         <div class="panel">
           <h3>Annotated MS1 Peaks &amp; Candidate Ranking (<span id="search-matches-count">0</span> peaks matched)</h3>
           <p class="info-note">
-            <strong>Scoring Transparency:</strong> Heuristic score (0–100) combines mass accuracy, relative peak intensity, and optional isotope envelope similarity (<code>idotp</code>). It is not a calibrated FDR probability. Peaks matching multiple isobaric candidates or adducts are explicitly flagged as <code>AMBIGUOUS</code>.
+            <strong>Scoring Transparency &amp; Interactive <code>idotp</code> Inspection:</strong> Heuristic score (0–100) combines mass accuracy, relative peak intensity, and optional isotope envelope similarity (<code>idotp</code>). <strong>Click any <code>idotp</code> value below</strong> to open the interactive Theoretical vs. Experimental Isotope Envelope comparison plot.
           </p>
           <div class="table-responsive">
             <table class="data-table" id="table-ms1-matches">
@@ -509,7 +627,7 @@
                   <th>Theo. m/z</th>
                   <th>Error (ppm)</th>
                   <th>Heuristic Score</th>
-                  <th>idotp</th>
+                  <th>idotp (Click to Plot)</th>
                   <th>Ambiguity &amp; Alternatives</th>
                 </tr>
               </thead>
@@ -517,6 +635,48 @@
                 <tr><td colspan="12" class="muted">Run MS1 search to view annotated glycan candidates.</td></tr>
               </tbody>
             </table>
+          </div>
+        </div>
+
+        <div id="isotope-comparison-panel" class="panel hidden" aria-live="polite">
+          <div class="table-header-bar">
+            <h3 id="isotope-panel-title">Isotope Envelope Comparison (Theoretical vs. Experimental)</h3>
+            <div class="table-controls">
+              <button type="button" class="btn btn-outline btn-xs" id="btn-close-isotope-panel">Close Plot</button>
+            </div>
+          </div>
+          <div id="isotope-panel-meta" class="summary-box" style="margin-bottom:12px;"></div>
+          <div class="card-grid-2">
+            <div>
+              <h4>Side-by-Side &amp; Mirror Isotopic Distribution Plot</h4>
+              <div class="spectrum-legend" style="margin-bottom:6px;">
+                <span class="legend-item"><i class="legend-dot" style="background:#2563eb;"></i> Theoretical IUPAC Envelope (%)</span>
+                <span class="legend-item"><i class="legend-dot" style="background:#059669;"></i> Observed Experimental Peaks (%)</span>
+                <span class="legend-item"><i class="legend-dot" style="background:#94a3b8;"></i> Local Spectrum Trace</span>
+              </div>
+              <div class="plot-container">
+                <svg id="isotope-comparison-svg" viewBox="0 0 640 310" preserveAspectRatio="xMidYMid meet" aria-label="Theoretical vs Experimental Isotope Envelope"></svg>
+              </div>
+            </div>
+            <div>
+              <h4>Isotopologue Peak Table (M0, M+1, M+2, &hellip;)</h4>
+              <div class="table-responsive">
+                <table class="data-table" id="table-isotope-envelope">
+                  <thead>
+                    <tr>
+                      <th>Isotope</th>
+                      <th>Theo. m/z</th>
+                      <th>Obs. m/z</th>
+                      <th>Error (ppm)</th>
+                      <th>Theo. Ratio (%)</th>
+                      <th>Obs. Ratio (%)</th>
+                      <th>&Delta; Ratio (%)</th>
+                    </tr>
+                  </thead>
+                  <tbody></tbody>
+                </table>
+              </div>
+            </div>
           </div>
         </div>
       </section>
@@ -792,7 +952,10 @@ EPKSCDKTHTCPPCPAPELLGGPSVFLFPPKPKDTLMISRTPEVTCVVVDVSHEDPEVKFNWYVDGVEVHNAKTKPREEQ
               <div class="form-group">
                 <label for="cal-reference-set">Reference Calibrant Panel</label>
                 <select id="cal-reference-set">
+                  <option value="auto">Auto-Select Best Panel (+ / &minus; Mode)</option>
                   <option value="nglycan_na">Canonical Human N-Glycans ([M+Na]+)</option>
+                  <option value="nglycan_neg">Canonical Human N-Glycans ([M-H]&minus;)</option>
+                  <option value="nglycan_h">Canonical Human N-Glycans ([M+H]+)</option>
                   <option value="peptide_h">MALDI Peptide Calibration Standard ([M+H]+)</option>
                 </select>
               </div>
@@ -803,6 +966,7 @@ EPKSCDKTHTCPPCPAPELLGGPSVFLFPPKPKDTLMISRTPEVTCVVVDVSHEDPEVKFNWYVDGVEVHNAKTKPREEQ
             </div>
             <div class="button-row">
               <button type="button" class="btn btn-primary" id="btn-run-calibration">Run Mass Calibration</button>
+              <button type="button" class="btn btn-outline" id="btn-reset-calibration">Reset Calibration</button>
             </div>
             <div id="calibration-result-box" class="summary-box">
               <p class="muted">Spectrum is currently uncalibrated.</p>

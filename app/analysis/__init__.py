@@ -97,6 +97,17 @@ from app.analysis.statistics import (
     run_leakage_free_classification,
     run_pca_analysis,
 )
+from app.analysis.spectrum_corrections import (
+    CorrectionConfig,
+    CorrectionResult,
+    apply_corrections,
+    list_available_corrections,
+)
+from app.analysis.synthetic_spectra import (
+    SyntheticSpectrum,
+    TruthEntry,
+    generate_complex_nglycan_spectrum,
+)
 
 __all__ = [
     "BatchAnalysisResult",
@@ -109,6 +120,8 @@ __all__ = [
     "BatchSampleInput",
     "BatchSampleOutcome",
     "CorrelationPairRecord",
+    "CorrectionConfig",
+    "CorrectionResult",
     "CrossValidatedClassificationResult",
     "DenominatorSetPolicy",
     "DerivedGlycanTraitValue",
@@ -147,8 +160,11 @@ __all__ = [
     "SearchMode",
     "SequonSite",
     "SpectrumQCReport",
+    "SyntheticSpectrum",
     "TargetedQueryItem",
+    "TruthEntry",
     "UnivariateROCResult",
+    "apply_corrections",
     "benjamini_hochberg_fdr",
     "build_mixomics_diablo_export_tables",
     "compute_correlation_matrix",
@@ -164,7 +180,9 @@ __all__ = [
     "execute_batch_analysis",
     "extract_batch_zip_safely",
     "find_n_glycosylation_sequons",
+    "generate_complex_nglycan_spectrum",
     "impute_missing_matrix",
+    "list_available_corrections",
     "parse_fasta_sequences",
     "preprocess_spectrum",
     "quantify_ms1_search_result",

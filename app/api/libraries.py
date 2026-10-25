@@ -21,10 +21,29 @@ from app.libraries.library_io import (
     import_library_from_delimited,
     import_library_from_json,
 )
-from app.libraries.library_search import LibrarySearchFilter, query_glycan_library
+from app.libraries.library_search import LibrarySearchFilter, get_entry_adduct_mz, query_glycan_library
 from app.libraries.library_validation import validate_glycan_library
 
 router = APIRouter(prefix="/api/libraries", tags=["libraries"])
+
+# Negative-mode ions shown next to the positive-mode ones in the library table
+NEGATIVE_DISPLAY_ADDUCTS = ("[M-H]-", "[M+Cl]-", "[M-2H]2-")
+
+
+def _entry_row(entry: Any) -> Dict[str, Any]:
+    """Serialize a library entry for the UI, always including negative-mode m/z values."""
+    row = entry.to_dict()
+    adducts = dict(row.get("adduct_mzs", {}))
+    negative: Dict[str, float] = {}
+    for code in NEGATIVE_DISPLAY_ADDUCTS:
+        mz = adducts.get(code)
+        if mz is None or mz <= 0:
+            mz = round(get_entry_adduct_mz(entry, code), 8)
+            adducts[code] = mz
+        negative[code] = mz
+    row["adduct_mzs"] = adducts
+    row["negative_mode_mz"] = negative
+    return row
 
 
 @router.get("/default")
@@ -35,7 +54,7 @@ def get_default_library() -> Dict[str, Any]:
         "library_name": library.library_name,
         "library_version": library.library_version,
         "entry_count": library.entry_count,
-        "entries": [e.to_dict() for e in library.entries],
+        "entries": [_entry_row(e) for e in library.entries],
     }
 
 
@@ -76,7 +95,7 @@ def generate_library_endpoint(request: Request) -> Dict[str, Any]:
             "library_version": library.library_version,
             "entry_count": library.entry_count,
             "validation_valid": val_res.is_valid,
-            "entries": [e.to_dict() for e in library.entries],
+            "entries": [_entry_row(e) for e in library.entries],
         }
     except HTTPException:
         raise
@@ -118,7 +137,7 @@ def query_library_endpoint(request: Request) -> Dict[str, Any]:
             "library_name": library.library_name,
             "total_in_library": library.entry_count,
             "matched_count": len(matches),
-            "entries": [m.entry.to_dict() for m in matches],
+            "entries": [_entry_row(m.entry) for m in matches],
         }
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Library query error: {exc}") from exc
@@ -186,7 +205,7 @@ def import_library_endpoint(request: Request) -> Dict[str, Any]:
             "library_version": library.library_version,
             "entry_count": library.entry_count,
             "validation_valid": val_res.is_valid,
-            "entries": [e.to_dict() for e in library.entries],
+            "entries": [_entry_row(e) for e in library.entries],
         }
     except HTTPException:
         raise
