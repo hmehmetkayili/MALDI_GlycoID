@@ -1,0 +1,16 @@
+version: "3.9"
+
+services:
+  maldi-glycoid:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: maldi-glycoid
+    ports:
+      - "8000:8000"
+    environment:
+      - MALDI_GLYCOID_HOST=0.0.0.0
+      - MALDI_GLYCOID_PORT=8000
+      - MALDI_GLYCOID_MAX_UPLOAD_BYTES=52428800
+      - MALDI_GLYCOID_MAX_BATCH_FILES=100
+    restart: unless-stopped

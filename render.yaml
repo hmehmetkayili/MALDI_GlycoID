@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: maldi-glycoid
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python scripts/run_local.py --host 0.0.0.0
+    healthCheckPath: /api/health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.11
+      - key: MALDI_GLYCOID_HOST
+        value: 0.0.0.0
+      - key: MPLCONFIGDIR
+        value: /tmp/maldi_glycoid_mpl

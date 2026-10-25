@@ -1,0 +1,1129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MALDI-GlycoID — MALDI-TOF MS N-Glycan &amp; Glycopeptide Analysis Platform</title>
+  <link rel="stylesheet" href="/static/css/styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <!-- Left Sidebar Navigation (All 12 Required Pages) -->
+    <aside class="sidebar" aria-label="Primary Navigation">
+      <div class="brand-header">
+        <div class="brand-logo" aria-hidden="true">MG</div>
+        <div>
+          <h1 class="brand-title">MALDI-GlycoID</h1>
+          <p class="brand-subtitle">v1.0.0 Scientific Platform</p>
+        </div>
+      </div>
+
+      <nav class="nav-menu" id="main-nav">
+        <button type="button" class="nav-item active" data-view="dashboard">
+          <span class="nav-num">01</span> Dashboard
+        </button>
+        <button type="button" class="nav-item" data-view="import">
+          <span class="nav-num">02</span> Import Data
+        </button>
+        <button type="button" class="nav-item" data-view="library">
+          <span class="nav-num">03</span> Glycan Library
+        </button>
+        <button type="button" class="nav-item" data-view="search">
+          <span class="nav-num">04</span> MS1 Glycan Search
+        </button>
+        <button type="button" class="nav-item" data-view="glycopeptides">
+          <span class="nav-num">05</span> Glycopeptide Search
+        </button>
+        <button type="button" class="nav-item" data-view="batch">
+          <span class="nav-num">06</span> Batch Processing
+        </button>
+        <button type="button" class="nav-item" data-view="quantification">
+          <span class="nav-num">07</span> Quantification
+        </button>
+        <button type="button" class="nav-item" data-view="qc">
+          <span class="nav-num">08</span> Quality Control
+        </button>
+        <button type="button" class="nav-item" data-view="statistics">
+          <span class="nav-num">09</span> Statistics and Visualization
+        </button>
+        <button type="button" class="nav-item" data-view="exports">
+          <span class="nav-num">10</span> Export Results
+        </button>
+        <button type="button" class="nav-item" data-view="settings">
+          <span class="nav-num">11</span> Settings
+        </button>
+        <button type="button" class="nav-item" data-view="help">
+          <span class="nav-num">12</span> Help and Documentation
+        </button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="status-pill" id="api-health-badge">Engine: Ready (Offline Validated)</div>
+      </div>
+    </aside>
+
+    <!-- Main Workspace Area -->
+    <div class="main-content">
+      <header class="topbar">
+        <div class="topbar-context">
+          <span class="context-item">Active Sample: <strong id="active-sample-badge">None loaded</strong></span>
+          <span class="context-item">Data Type: <strong id="active-datatype-badge">—</strong></span>
+          <span class="context-item">Active Library: <strong id="active-library-badge">Human N-Glycan Native v1.0.0 (333 entries)</strong></span>
+        </div>
+        <div class="topbar-actions">
+          <button type="button" class="btn btn-secondary" id="btn-load-example-Top">Load Synthetic Example Spectrum</button>
+          <button type="button" class="btn btn-primary" id="btn-quick-run-search">Run MS1 Search</button>
+        </div>
+      </header>
+
+      <!-- Global Alert / Error Banner -->
+      <div id="global-alert-banner" class="alert-banner hidden" role="alert">
+        <span id="global-alert-text"></span>
+        <button type="button" class="alert-close" id="btn-close-alert" aria-label="Dismiss message">&times;</button>
+      </div>
+
+      <!-- =============================================================== -->
+      <!-- VIEW 1: DASHBOARD                                               -->
+      <!-- =============================================================== -->
+      <section id="view-dashboard" class="view-section active" aria-labelledby="heading-dashboard">
+        <div class="section-header">
+          <h2 id="heading-dashboard">Dashboard</h2>
+          <p>Modular, scientifically transparent MALDI-TOF MS N-glycan profiling and glycopeptide screening.</p>
+        </div>
+
+        <div class="kpi-grid">
+          <div class="kpi-card">
+            <span class="kpi-label">Active Reference Library</span>
+            <strong class="kpi-value" id="kpi-lib-count">333</strong>
+            <span class="kpi-sub">Human N-Glycan Compositions</span>
+          </div>
+          <div class="kpi-card">
+            <span class="kpi-label">Imported Spectrum Peaks</span>
+            <strong class="kpi-value" id="kpi-peak-count">0</strong>
+            <span class="kpi-sub" id="kpi-spectrum-type">No spectrum loaded</span>
+          </div>
+          <div class="kpi-card">
+            <span class="kpi-label">Annotated MS1 Peaks</span>
+            <strong class="kpi-value" id="kpi-matched-count">0</strong>
+            <span class="kpi-sub" id="kpi-match-rate">Match rate: 0.0%</span>
+          </div>
+          <div class="kpi-card">
+            <span class="kpi-label">Spectrum QC Status</span>
+            <strong class="kpi-value" id="kpi-qc-status">—</strong>
+            <span class="kpi-sub" id="kpi-median-ppm">Median |ppm|: —</span>
+          </div>
+        </div>
+
+        <div class="card-grid-2">
+          <div class="panel">
+            <h3>Quick-Start Analytical Workflow</h3>
+            <ol class="workflow-steps">
+              <li><strong>1. Import Data:</strong> Upload `.txt`, `.xy`, `.csv`, `.tsv`, `.mzML`, or `.mzXML` spectra, or load the built-in synthetic native N-glycan validation spectrum.</li>
+              <li><strong>2. Configure Library &amp; Calibration:</strong> Select or generate a biosynthetically constrained human N-glycan library and optionally perform internal/external polynomial mass calibration.</li>
+              <li><strong>3. MS1 Glycan or Glycopeptide Search:</strong> Run Mode A (Targeted) or Mode B (Library) search with transparent ppm/Da tolerance, multi-adduct expansion, and explicit ambiguity reporting.</li>
+              <li><strong>4. Quantify, QC &amp; Export:</strong> Inspect base-peak and relative abundances, MassyTools-inspired QC metrics, multivariate statistics, and download the 12-category export bundle.</li>
+            </ol>
+            <div class="button-row">
+              <button type="button" class="btn btn-primary" id="btn-dashboard-load-example">Load Synthetic Example &amp; Run Full Pipeline</button>
+              <button type="button" class="btn btn-outline" data-goto="import">Go to Import Data</button>
+            </div>
+          </div>
+
+          <div class="panel">
+            <h3>Scientific Integrity &amp; Scope Safeguards</h3>
+            <ul class="safeguard-list">
+              <li><strong>Composition vs. Structure:</strong> MS1 mass matches identify monosaccharide compositions (`Hex`, `HexNAc`, `dHex`, `Neu5Ac`, `Neu5Gc`), not full glycosidic linkage or branching topologies unless supported by linkage-specific derivatization or MS/MS.</li>
+              <li><strong>Proton vs. Neutral Hydrogen:</strong> Proton mass ($1.0072764522\text{ Da}$) and neutral $\text{H}$ atom mass ($1.0078250322\text{ Da}$) are strictly distinguished across all charge and adduct calculations.</li>
+              <li><strong>Released vs. Peptide-Attached Glycans:</strong> Intact glycopeptide calculations strictly subtract the reducing-end $\text{H}_2\text{O}$ ($18.010565\text{ Da}$) present on free released glycans.</li>
+              <li><strong>Zero Silent Fabrication:</strong> Peak areas and profile S/N are never fabricated on centroid-only peak lists, and spectra are never silently calibrated.</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <!-- =============================================================== -->
+      <!-- VIEW 2: IMPORT DATA                                             -->
+      <!-- =============================================================== -->
+      <section id="view-import" class="view-section" aria-labelledby="heading-import">
+        <div class="section-header">
+          <h2 id="heading-import">Import Data</h2>
+          <p>Upload centroid peak lists or profile mass spectra (`.txt`, `.xy`, `.csv`, `.tsv`, `.mzML`, `.mzXML`, or Bruker exports).</p>
+        </div>
+
+        <div class="card-grid-2">
+          <div class="panel">
+            <h3>Spectrum File Upload</h3>
+            <div id="dropzone-spectrum" class="dropzone" tabindex="0" role="button" aria-label="Drag and drop spectrum file or click to browse">
+              <p class="dropzone-title">Drag &amp; drop spectrum file here, or click to select</p>
+              <p class="dropzone-sub">Supported formats: .txt, .xy, .csv, .tsv, .mzML, .mzXML, Bruker fid/acqus</p>
+              <input type="file" id="input-spectrum-file" accept=".txt,.xy,.csv,.tsv,.mzml,.mzxml,.fid" class="hidden-file-input" />
+            </div>
+
+            <div class="form-grid">
+              <div class="form-group">
+                <label for="import-sample-id">Sample ID</label>
+                <input type="text" id="import-sample-id" placeholder="e.g., Serum_NGlycan_01" />
+              </div>
+              <div class="form-group">
+                <label for="import-data-type">Spectrum Data Type</label>
+                <select id="import-data-type">
+                  <option value="">Auto-detect (Centroid vs. Profile)</option>
+                  <option value="centroid">Centroid Peak List</option>
+                  <option value="profile">Profile Spectrum</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="import-delimiter">Column Delimiter</label>
+                <select id="import-delimiter">
+                  <option value="">Auto-detect</option>
+                  <option value=",">Comma (,)</option>
+                  <option value="&#9;">Tab (\t)</option>
+                  <option value=";">Semicolon (;)</option>
+                  <option value=" ">Whitespace</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="import-decimal">Decimal Separator</label>
+                <select id="import-decimal">
+                  <option value=".">Period (.)</option>
+                  <option value=",">Comma (,)</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="import-mz-col">Explicit m/z Column (if multi-column)</label>
+                <input type="text" id="import-mz-col" placeholder="Auto or header name/index" />
+              </div>
+              <div class="form-group">
+                <label for="import-int-col">Explicit Intensity Column (if multi-column)</label>
+                <input type="text" id="import-int-col" placeholder="Auto or header name/index" />
+              </div>
+              <div class="form-group">
+                <label for="import-dup-policy">Duplicate m/z Policy</label>
+                <select id="import-dup-policy">
+                  <option value="keep_max_intensity">Keep Max Intensity</option>
+                  <option value="sum_intensities">Sum Intensities</option>
+                  <option value="average_intensities">Average Intensities</option>
+                  <option value="keep_all">Keep All</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="button-row">
+              <button type="button" class="btn btn-primary" id="btn-upload-spectrum">Parse &amp; Import File</button>
+              <button type="button" class="btn btn-secondary" id="btn-load-synthetic-txt">Load Synthetic TXT Example</button>
+              <button type="button" class="btn btn-outline" id="btn-load-synthetic-csv">Load Synthetic CSV Example</button>
+              <button type="button" class="btn btn-outline" id="btn-load-synthetic-xy">Load Synthetic XY Example</button>
+            </div>
+          </div>
+
+          <div class="panel">
+            <h3>Imported Spectrum Summary &amp; Diagnostics</h3>
+            <div id="import-summary-box" class="summary-box">
+              <p class="muted">No spectrum imported yet. Upload a `.txt`, `.xy`, `.csv`, `.mzML` file or load a synthetic example.</p>
+            </div>
+
+            <div class="spectrum-viewer-header">
+              <h4>Interactive Mass Spectrum Viewer</h4>
+              <div class="spectrum-toolbar">
+                <select id="spec-plot-style" title="Spectrum Display Style" aria-label="Spectrum Display Style">
+                  <option value="auto">Style: Auto (Lollipops / Curve)</option>
+                  <option value="sticks">Style: Centroid Lollipops</option>
+                  <option value="profile">Style: Profile Curve + Area</option>
+                </select>
+                <select id="spec-label-mode" title="Peak Label Mode" aria-label="Peak Label Mode">
+                  <option value="smart">Labels: Smart Non-Overlapping</option>
+                  <option value="matched">Labels: Matched Glycans Only</option>
+                  <option value="none">Labels: Hidden</option>
+                </select>
+                <input type="number" id="spec-zoom-min" placeholder="Min m/z" step="10" class="spec-zoom-input" aria-label="Minimum m/z zoom" />
+                <input type="number" id="spec-zoom-max" placeholder="Max m/z" step="10" class="spec-zoom-input" aria-label="Maximum m/z zoom" />
+                <button type="button" class="btn btn-outline btn-xs" id="btn-spec-zoom-apply">Zoom</button>
+                <button type="button" class="btn btn-outline btn-xs" id="btn-spec-zoom-reset">Reset</button>
+              </div>
+            </div>
+
+            <div class="spectrum-legend">
+              <span class="legend-item"><i class="legend-dot dot-base"></i> Base Peak (100%)</span>
+              <span class="legend-item"><i class="legend-dot dot-matched"></i> Annotated N-Glycan</span>
+              <span class="legend-item"><i class="legend-dot dot-mono"></i> Monoisotopic Peak</span>
+              <span class="legend-item"><i class="legend-dot dot-iso"></i> Isotopic [M+1] Satellite</span>
+            </div>
+
+            <div id="spectrum-canvas-container" class="plot-container spectrum-interactive-wrap">
+              <svg id="spectrum-preview-svg" viewBox="0 0 880 340" preserveAspectRatio="xMidYMid meet" aria-label="MS1 Spectrum Interactive Plot"></svg>
+              <div id="spectrum-hover-tooltip" class="spectrum-tooltip hidden"></div>
+            </div>
+
+            <div id="raw-txt-preview-panel" class="raw-txt-panel hidden">
+              <div class="raw-txt-header">
+                <strong>Raw Text File Structure Inspector (`.txt` / `.csv` / `.xy`)</strong>
+                <span class="muted" id="raw-txt-meta-note">Showing header, comments &amp; initial data rows</span>
+              </div>
+              <pre id="raw-txt-code" class="raw-txt-code"></pre>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="table-header-bar">
+            <h3>Imported Peak List &amp; Relative Intensity Profile</h3>
+            <div class="table-controls">
+              <label for="import-table-sort" class="muted">Order:</label>
+              <select id="import-table-sort">
+                <option value="intensity_desc">Highest Intensity First (Top Peaks)</option>
+                <option value="mz_asc">m/z Ascending Order</option>
+              </select>
+              <input type="text" id="import-table-filter" placeholder="Filter by m/z (e.g. 1647)..." class="table-filter-input" />
+            </div>
+          </div>
+          <div class="table-responsive">
+            <table class="data-table" id="table-import-preview">
+              <thead>
+                <tr>
+                  <th>Peak #</th>
+                  <th>m/z (Da/e)</th>
+                  <th>Intensity (a.u.)</th>
+                  <th>Relative Intensity (%)</th>
+                  <th>Peak Classification / Annotation</th>
+                  <th>Peak Area</th>
+                  <th>S/N (SNR)</th>
+                  <th>FWHM (Da)</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr><td colspan="8" class="muted">No peaks to display.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- =============================================================== -->
+      <!-- VIEW 3: GLYCAN LIBRARY                                          -->
+      <!-- =============================================================== -->
+      <section id="view-library" class="view-section" aria-labelledby="heading-library">
+        <div class="section-header">
+          <h2 id="heading-library">Glycan Library</h2>
+          <p>Generate biosynthetically constrained human N-glycan composition libraries and query exact theoretical masses.</p>
+        </div>
+
+        <div class="card-grid-2">
+          <div class="panel">
+            <h3>Automatic Human N-Glycan Library Generator</h3>
+            <div class="form-grid">
+              <div class="form-group">
+                <label for="lib-min-hex">Hex Range (Min–Max)</label>
+                <div class="inline-pair">
+                  <input type="number" id="lib-min-hex" value="3" min="0" max="20" />
+                  <input type="number" id="lib-max-hex" value="12" min="3" max="25" />
+                </div>
+              </div>
+              <div class="form-group">
+                <label for="lib-min-hexnac">HexNAc Range (Min–Max)</label>
+                <div class="inline-pair">
+                  <input type="number" id="lib-min-hexnac" value="2" min="0" max="15" />
+                  <input type="number" id="lib-max-hexnac" value="8" min="2" max="15" />
+                </div>
+              </div>
+              <div class="form-group">
+                <label for="lib-max-dhex">Max dHex (Fuc)</label>
+                <input type="number" id="lib-max-dhex" value="3" min="0" max="6" />
+              </div>
+              <div class="form-group">
+                <label for="lib-max-neu5ac">Max Neu5Ac</label>
+                <input type="number" id="lib-max-neu5ac" value="4" min="0" max="6" />
+              </div>
+              <div class="form-group">
+                <label for="lib-labeling">Derivatization / Labeling</label>
+                <select id="lib-labeling">
+                  <option value="NONE">Native (Free Reducing End)</option>
+                  <option value="2-AB">2-AB Reductive Amination</option>
+                  <option value="2-AA">2-AA Reductive Amination</option>
+                  <option value="PROCAINAMIDE">Procainamide</option>
+                  <option value="PA">2-Aminopyridine (PA)</option>
+                  <option value="PERMETHYLATED">Permethylated (Non-Reduced)</option>
+                  <option value="PERMETHYLATED_REDUCED">Permethylated (Reduced Alditol)</option>
+                  <option value="EEC_SIALIC">Linkage-Specific Ethyl Esterification (EEC_SIALIC)</option>
+                  <option value="DMA_SIALIC">Linkage-Specific Dimethylamidation (DMA_SIALIC)</option>
+                </select>
+              </div>
+              <div class="form-group checkbox-group">
+                <label><input type="checkbox" id="lib-include-neu5gc" /> Include non-human/dietary Neu5Gc</label>
+                <label><input type="checkbox" id="lib-expand-linkages" /> Expand α2,3 / α2,6 sialic linkages</label>
+              </div>
+            </div>
+            <div class="button-row">
+              <button type="button" class="btn btn-primary" id="btn-generate-library">Generate &amp; Validate Library</button>
+              <button type="button" class="btn btn-outline" id="btn-reset-default-library">Reload Default Native Library (333)</button>
+            </div>
+          </div>
+
+          <div class="panel">
+            <h3>Search &amp; Filter Active Library</h3>
+            <div class="form-grid">
+              <div class="form-group">
+                <label for="lib-filter-comp">Composition Substring / Query</label>
+                <input type="text" id="lib-filter-comp" placeholder="e.g., Hex5HexNAc4 or H5N4F1" />
+              </div>
+              <div class="form-group">
+                <label for="lib-filter-class">N-Glycan Class</label>
+                <select id="lib-filter-class">
+                  <option value="">All Classes</option>
+                  <option value="high_mannose">High-Mannose</option>
+                  <option value="hybrid">Hybrid</option>
+                  <option value="complex">Complex</option>
+                  <option value="paucimannose">Paucimannose</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="lib-filter-min-mass">Min Neutral Mass (Da)</label>
+                <input type="number" id="lib-filter-min-mass" placeholder="e.g., 900" step="0.1" />
+              </div>
+              <div class="form-group">
+                <label for="lib-filter-max-mass">Max Neutral Mass (Da)</label>
+                <input type="number" id="lib-filter-max-mass" placeholder="e.g., 3500" step="0.1" />
+              </div>
+            </div>
+            <div class="button-row">
+              <button type="button" class="btn btn-secondary" id="btn-query-library">Filter Library</button>
+            </div>
+            <div id="library-validation-banner" class="info-note">
+              Library mass consistency verified against Stage 1 IUPAC/NIST atomic constants.
+            </div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h3>Reference Library Entries (<span id="lib-shown-count">0</span> shown)</h3>
+          <div class="table-responsive">
+            <table class="data-table" id="table-library-entries">
+              <thead>
+                <tr>
+                  <th>Library ID</th>
+                  <th>Composition</th>
+                  <th>Class</th>
+                  <th>Antennary Hypothesis</th>
+                  <th>Neutral Mass (Da)</th>
+                  <th>[M+Na]+ (m/z)</th>
+                  <th>[M+H]+ (m/z)</th>
+                  <th>[M+K]+ (m/z)</th>
+                  <th>Annotation Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr><td colspan="9" class="muted">Loading library entries...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- =============================================================== -->
+      <!-- VIEW 4: MS1 GLYCAN SEARCH                                       -->
+      <!-- =============================================================== -->
+      <section id="view-search" class="view-section" aria-labelledby="heading-search">
+        <div class="section-header">
+          <h2 id="heading-search">MS1 Glycan Search</h2>
+          <p>GlycoQuest-like Mode A (Targeted) and Mode B (Library) MS1 peak matching with transparent heuristic ranking and ambiguity retention.</p>
+        </div>
+
+        <div class="panel">
+          <h3>MS1 Search Parameters</h3>
+          <div class="form-grid-4">
+            <div class="form-group">
+              <label for="search-mode">Search Mode</label>
+              <select id="search-mode">
+                <option value="library">Mode B — Reference Library Search</option>
+                <option value="targeted">Mode A — Targeted Composition/Mass List</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="search-tolerance">Mass Tolerance</label>
+              <div class="inline-pair">
+                <input type="number" id="search-tolerance" value="25.0" min="0.1" step="0.5" />
+                <select id="search-tolerance-unit">
+                  <option value="ppm">ppm</option>
+                  <option value="Da">Da</option>
+                </select>
+              </div>
+            </div>
+            <div class="form-group">
+              <label for="search-polarity">Ionization Polarity</label>
+              <select id="search-polarity">
+                <option value="positive">Positive Mode (+)</option>
+                <option value="negative">Negative Mode (-)</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="search-labeling">Derivatization / Label</label>
+              <select id="search-labeling">
+                <option value="NONE">Native (NONE)</option>
+                <option value="2-AB">2-AB</option>
+                <option value="2-AA">2-AA</option>
+                <option value="PROCAINAMIDE">Procainamide</option>
+                <option value="PA">PA</option>
+                <option value="PERMETHYLATED">Permethylated</option>
+                <option value="PERMETHYLATED_REDUCED">Permethylated (Reduced)</option>
+                <option value="EEC_SIALIC">EEC_SIALIC (α2,3/α2,6)</option>
+                <option value="DMA_SIALIC">DMA_SIALIC (α2,3/α2,6)</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="search-adducts">Adduct Ions (comma-separated)</label>
+              <input type="text" id="search-adducts" value="[M+Na]+, [M+K]+, [M+H]+" />
+            </div>
+            <div class="form-group">
+              <label for="search-charges">Charge States (comma-separated)</label>
+              <input type="text" id="search-charges" value="1" />
+            </div>
+            <div class="form-group">
+              <label for="search-min-rel-int">Min Relative Intensity (%)</label>
+              <input type="number" id="search-min-rel-int" value="0.0" min="0" max="100" step="0.5" />
+            </div>
+            <div class="form-group">
+              <label for="search-targeted-query">Mode A Targets (if Mode A selected)</label>
+              <input type="text" id="search-targeted-query" placeholder="e.g., Hex5HexNAc2, Hex3HexNAc4dHex1" />
+            </div>
+          </div>
+          <div class="button-row">
+            <button type="button" class="btn btn-primary" id="btn-execute-ms1-search">Execute MS1 Glycan Search</button>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h3>Annotated MS1 Peaks &amp; Candidate Ranking (<span id="search-matches-count">0</span> peaks matched)</h3>
+          <p class="info-note">
+            <strong>Scoring Transparency:</strong> Heuristic score (0–100) combines mass accuracy, relative peak intensity, and optional isotope envelope similarity (<code>idotp</code>). It is not a calibrated FDR probability. Peaks matching multiple isobaric candidates or adducts are explicitly flagged as <code>AMBIGUOUS</code>.
+          </p>
+          <div class="table-responsive">
+            <table class="data-table" id="table-ms1-matches">
+              <thead>
+                <tr>
+                  <th>Peak #</th>
+                  <th>Observed m/z</th>
+                  <th>Intensity</th>
+                  <th>Rel. Int (%)</th>
+                  <th>Top Composition</th>
+                  <th>Class</th>
+                  <th>Adduct</th>
+                  <th>Theo. m/z</th>
+                  <th>Error (ppm)</th>
+                  <th>Heuristic Score</th>
+                  <th>idotp</th>
+                  <th>Ambiguity &amp; Alternatives</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr><td colspan="12" class="muted">Run MS1 search to view annotated glycan candidates.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- =============================================================== -->
+      <!-- VIEW 5: GLYCOPEPTIDE SEARCH                                     -->
+      <!-- =============================================================== -->
+      <section id="view-glycopeptides" class="view-section" aria-labelledby="heading-glycopeptides">
+        <div class="section-header">
+          <h2 id="heading-glycopeptides">Glycopeptide Search</h2>
+          <p>In-silico protease digestion, canonical N-X-S/T (X &ne; P) sequon detection, and peptide-attached N-glycan moiety screening.</p>
+        </div>
+
+        <div class="card-grid-2">
+          <div class="panel">
+            <h3>Protein Sequence / FASTA &amp; Digestion Settings</h3>
+            <div class="form-group">
+              <label for="gp-fasta-input">FASTA or Raw Protein Sequence</label>
+              <textarea id="gp-fasta-input" rows="5">&gt;sp|P01857|IGHG1_HUMAN_FC Synthetic IgG1 Fc Region
+EPKSCDKTHTCPPCPAPELLGGPSVFLFPPKPKDTLMISRTPEVTCVVVDVSHEDPEVKFNWYVDGVEVHNAKTKPREEQYNSTYRVVSVLTVLHQDWLNGKEYKCKVSNKALPAPIEKTISKAK</textarea>
+            </div>
+            <div class="form-grid">
+              <div class="form-group">
+                <label for="gp-protease">Protease Enzyme</label>
+                <select id="gp-protease">
+                  <option value="Trypsin">Trypsin (K/R not before P)</option>
+                  <option value="Trypsin/P">Trypsin/P (K/R including before P)</option>
+                  <option value="Chymotrypsin">Chymotrypsin (F/Y/W/L)</option>
+                  <option value="Glu-C">Glu-C (E/D)</option>
+                  <option value="Lys-C">Lys-C (K)</option>
+                  <option value="No Cleavage">No Cleavage (Intact Peptide)</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="gp-missed-cleavages">Max Missed Cleavages</label>
+                <input type="number" id="gp-missed-cleavages" value="1" min="0" max="4" />
+              </div>
+              <div class="form-group">
+                <label for="gp-precursor-mzs">Observed Precursor m/z Values (comma-separated)</label>
+                <input type="text" id="gp-precursor-mzs" value="1317.5274, 1398.5538, 2634.0475" />
+              </div>
+              <div class="form-group">
+                <label for="gp-tolerance-ppm">Precursor Tolerance (ppm)</label>
+                <input type="number" id="gp-tolerance-ppm" value="25.0" min="1" step="1" />
+              </div>
+              <div class="form-group">
+                <label for="gp-oxonium-mzs">Optional Observed MS/MS Fragment m/z List</label>
+                <input type="text" id="gp-oxonium-mzs" placeholder="e.g., 204.0866, 366.1395, 1392.6278" />
+              </div>
+              <div class="form-group checkbox-group">
+                <label><input type="checkbox" id="gp-cys-cam" checked /> Fixed Carbamidomethyl-Cys (+57.0215 Da)</label>
+              </div>
+            </div>
+            <div class="button-row">
+              <button type="button" class="btn btn-primary" id="btn-run-glycopeptide-search">Screen Glycopeptides</button>
+            </div>
+          </div>
+
+          <div class="panel">
+            <h3>Peptide-Attached Glycan Moiety Convention</h3>
+            <p class="info-note">
+              <strong>Attached Moiety Rule:</strong> Unlike free released N-glycans (which contain a reducing-end $\text{H}_2\text{O}$ of $18.010565\text{ Da}$), N-glycans covalently attached to asparagine in a glycopeptide omit the terminal $\text{H}_2\text{O}$:
+              $$\text{Mass}_{\text{glycopeptide}} = \text{Mass}_{\text{peptide}} + \sum \text{Mass}_{\text{monosaccharide residues}}$$
+            </p>
+            <h4>Detected N-X-S/T (X &ne; P) Sequons in Sequence</h4>
+            <div id="gp-sequon-summary" class="summary-box">
+              <p class="muted">Run glycopeptide screening to list digested sequon-bearing peptides.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h3>Screened Glycopeptide Candidates (<span id="gp-matches-count">0</span> matches)</h3>
+          <div class="table-responsive">
+            <table class="data-table" id="table-glycopeptide-matches">
+              <thead>
+                <tr>
+                  <th>Protein ID</th>
+                  <th>Peptide Sequence</th>
+                  <th>Sequon Site(s)</th>
+                  <th>Glycan Composition</th>
+                  <th>Peptide Mass (Da)</th>
+                  <th>Attached Glycan Moiety (Da)</th>
+                  <th>Obs. m/z</th>
+                  <th>Theo. m/z</th>
+                  <th>Adduct / z</th>
+                  <th>Error (ppm)</th>
+                  <th>Confidence Category</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr><td colspan="11" class="muted">No glycopeptide candidates screened yet.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- =============================================================== -->
+      <!-- VIEW 6: BATCH PROCESSING                                        -->
+      <!-- =============================================================== -->
+      <section id="view-batch" class="view-section" aria-labelledby="heading-batch">
+        <div class="section-header">
+          <h2 id="heading-batch">Batch Processing</h2>
+          <p>Fault-isolated multi-sample and ZIP archive execution with combined abundance matrices and reproducibility logging.</p>
+        </div>
+
+        <div class="card-grid-2">
+          <div class="panel">
+            <h3>Upload Multiple Spectrum Files or Safe ZIP Archive</h3>
+            <div class="form-group">
+              <label for="input-batch-files">Select Multiple Spectrum Files or a Flat `.zip` Archive</label>
+              <input type="file" id="input-batch-files" multiple accept=".txt,.xy,.csv,.tsv,.mzml,.mzxml,.zip" />
+            </div>
+            <div class="form-grid">
+              <div class="form-group">
+                <label for="batch-default-group">Default Study Group Label</label>
+                <input type="text" id="batch-default-group" value="Cohort_A" />
+              </div>
+              <div class="form-group">
+                <label for="batch-tolerance-ppm">Batch Mass Tolerance (ppm)</label>
+                <input type="number" id="batch-tolerance-ppm" value="25.0" min="1" step="1" />
+              </div>
+            </div>
+            <div class="button-row">
+              <button type="button" class="btn btn-primary" id="btn-run-batch-upload">Execute Batch Analysis</button>
+              <button type="button" class="btn btn-secondary" id="btn-run-demo-batch">Run Synthetic 2-Sample Demo Batch</button>
+            </div>
+          </div>
+
+          <div class="panel">
+            <h3>Batch Status &amp; Reproducibility Manifest</h3>
+            <div id="batch-summary-box" class="summary-box">
+              <p class="muted">No batch job executed yet.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h3>Per-Sample Batch Outcomes &amp; Fault Isolation Report</h3>
+          <div class="table-responsive">
+            <table class="data-table" id="table-batch-outcomes">
+              <thead>
+                <tr>
+                  <th>Sample ID</th>
+                  <th>Filename</th>
+                  <th>Group</th>
+                  <th>Data Type</th>
+                  <th>Imported Peaks</th>
+                  <th>Matched Peaks</th>
+                  <th>Quantified Glycans</th>
+                  <th>Median |ppm|</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr><td colspan="9" class="muted">Execute a batch job to inspect sample outcomes.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- =============================================================== -->
+      <!-- VIEW 7: QUANTIFICATION                                          -->
+      <!-- =============================================================== -->
+      <section id="view-quantification" class="view-section" aria-labelledby="heading-quantification">
+        <div class="section-header">
+          <h2 id="heading-quantification">Quantification</h2>
+          <p>Base-peak normalization, total-annotated-glycan relative abundance, adduct aggregation provenance, and hypothesis-labeled derived traits.</p>
+        </div>
+
+        <div class="panel">
+          <h3>Quantification &amp; Aggregation Policies</h3>
+          <div class="form-grid-4">
+            <div class="form-group">
+              <label for="quant-denom-policy">Base-Peak Denominator Policy</label>
+              <select id="quant-denom-policy">
+                <option value="all_eligible_spectrum_peaks">All Eligible Spectrum Peaks</option>
+                <option value="annotated_glycan_peaks_only">Annotated Glycan Peaks Only</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="quant-agg-policy">Composition Adduct Aggregation Policy</label>
+              <select id="quant-agg-policy">
+                <option value="primary_adduct_only">Primary Adduct Only (e.g., [M+Na]+)</option>
+                <option value="highest_intensity_peak_per_composition">Highest Intensity Peak per Composition</option>
+                <option value="explicit_sum_distinct_adducts">Explicit Sum of Distinct Adducts</option>
+                <option value="no_aggregation_peak_level">No Aggregation (Peak-Level)</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="quant-primary-adduct">Primary Adduct</label>
+              <input type="text" id="quant-primary-adduct" value="[M+Na]+" />
+            </div>
+            <div class="form-group checkbox-group">
+              <label><input type="checkbox" id="quant-exclude-ambiguous" /> Exclude Ambiguous Peaks from Aggregation</label>
+            </div>
+          </div>
+          <div class="button-row">
+            <button type="button" class="btn btn-primary" id="btn-run-quantification">Recalculate Quantification &amp; Derived Traits</button>
+          </div>
+        </div>
+
+        <div class="card-grid-2">
+          <div class="panel">
+            <h3>Quantified N-Glycan Compositions</h3>
+            <div class="table-responsive">
+              <table class="data-table" id="table-quantified-glycans">
+                <thead>
+                  <tr>
+                    <th>Composition</th>
+                    <th>Class</th>
+                    <th>Aggregated Intensity</th>
+                    <th>Peak Area</th>
+                    <th>Base-Peak (%)</th>
+                    <th>Relative Abundance (%)</th>
+                    <th>Adducts &amp; Provenance</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr><td colspan="7" class="muted">Run quantification to view composition abundances.</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="panel">
+            <h3>Hypothesis-Labeled Derived Glycan Traits</h3>
+            <div class="table-responsive">
+              <table class="data-table" id="table-derived-traits">
+                <thead>
+                  <tr>
+                    <th>Trait Code</th>
+                    <th>Trait Name</th>
+                    <th>Value (%)</th>
+                    <th>Hypothesis Flag</th>
+                    <th>Scientific Disclaimer</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr><td colspan="5" class="muted">Run quantification to compute derived glycan traits.</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- =============================================================== -->
+      <!-- VIEW 8: QUALITY CONTROL                                         -->
+      <!-- =============================================================== -->
+      <section id="view-qc" class="view-section" aria-labelledby="heading-qc">
+        <div class="section-header">
+          <h2 id="heading-qc">Quality Control &amp; Mass Calibration</h2>
+          <p>Empirical polynomial least-squares mass calibration and MassyTools-inspired QC criteria with explicit threshold provenance.</p>
+        </div>
+
+        <div class="card-grid-2">
+          <div class="panel">
+            <h3>Internal / Reference Mass Calibration</h3>
+            <p class="info-note">
+              <strong>Zero Silent Calibration Policy:</strong> Calibration is performed only when explicitly triggered below and when the minimum calibrant count safeguard ($\ge 2$ linear, $\ge 3$ quadratic) is satisfied.
+            </p>
+            <div class="form-grid">
+              <div class="form-group">
+                <label for="cal-model-type">Polynomial Model</label>
+                <select id="cal-model-type">
+                  <option value="linear">Linear Least-Squares (mz_cal = a·mz + b)</option>
+                  <option value="quadratic">Quadratic Least-Squares (mz_cal = a·mz² + b·mz + c)</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="cal-reference-set">Reference Calibrant Panel</label>
+                <select id="cal-reference-set">
+                  <option value="nglycan_na">Canonical Human N-Glycans ([M+Na]+)</option>
+                  <option value="peptide_h">MALDI Peptide Calibration Standard ([M+H]+)</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="cal-tolerance-ppm">Calibrant Match Window (ppm)</label>
+                <input type="number" id="cal-tolerance-ppm" value="120.0" min="5" step="5" />
+              </div>
+            </div>
+            <div class="button-row">
+              <button type="button" class="btn btn-primary" id="btn-run-calibration">Run Mass Calibration</button>
+            </div>
+            <div id="calibration-result-box" class="summary-box">
+              <p class="muted">Spectrum is currently uncalibrated.</p>
+            </div>
+          </div>
+
+          <div class="panel">
+            <h3>Spectrum Quality Control Evaluation</h3>
+            <div class="button-row">
+              <button type="button" class="btn btn-secondary" id="btn-evaluate-qc">Evaluate Spectrum QC</button>
+            </div>
+            <div class="table-responsive">
+              <table class="data-table" id="table-qc-checks">
+                <thead>
+                  <tr>
+                    <th>QC Metric</th>
+                    <th>Observed</th>
+                    <th>Pass Criterion</th>
+                    <th>Status</th>
+                    <th>Threshold Provenance</th>
+                    <th>Rationale</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr><td colspan="6" class="muted">Evaluate QC after running MS1 search.</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- =============================================================== -->
+      <!-- VIEW 9: STATISTICS AND VISUALIZATION                            -->
+      <!-- =============================================================== -->
+      <section id="view-statistics" class="view-section" aria-labelledby="heading-statistics">
+        <div class="section-header">
+          <h2 id="heading-statistics">Statistics and Visualization</h2>
+          <p>PCA, hierarchical clustering, BH-FDR group comparisons, univariate ROC, and strictly leakage-free cross-validated classification.</p>
+        </div>
+
+        <div class="card-grid-2">
+          <div class="panel">
+            <h3>Cohort Multivariate &amp; Differential Statistics</h3>
+            <p class="info-note">
+              <strong>Leakage-Free ML Guarantee:</strong> In cross-validated classification, missing-value imputation (`SimpleImputer`), `StandardScaler`, and `SelectKBest` feature selection are fitted strictly inside each training fold.
+            </p>
+            <div class="form-grid">
+              <div class="form-group">
+                <label for="stat-imputation">PCA / Clustering Imputation Policy</label>
+                <select id="stat-imputation">
+                  <option value="half_min_observed">Half Minimum Observed (0.5 &times; min)</option>
+                  <option value="median">Feature Median</option>
+                  <option value="zero">Zero Fill</option>
+                  <option value="knn">k-Nearest Neighbors (KNN)</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="stat-classifier">Leakage-Free CV Classifier</label>
+                <select id="stat-classifier">
+                  <option value="logistic_regression">Logistic Regression (L2)</option>
+                  <option value="random_forest">Random Forest (50 trees)</option>
+                </select>
+              </div>
+            </div>
+            <div class="button-row">
+              <button type="button" class="btn btn-primary" id="btn-run-demo-statistics">Run Demo Cohort Statistical &amp; ML Suite</button>
+            </div>
+            <div id="stat-ml-summary-box" class="summary-box">
+              <p class="muted">Run cohort statistics to view PCA variance, differential p/q-values, ROC AUC, and leakage-free CV accuracy.</p>
+            </div>
+          </div>
+
+          <div class="panel">
+            <h3>Annotated Spectrum &amp; PCA Visualization</h3>
+            <div id="stat-plot-container" class="plot-container">
+              <p class="muted">Plot preview appears here after running search or cohort statistics.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h3>Differential Group Comparisons (Welch t-test / Mann-Whitney U / BH-FDR)</h3>
+          <div class="table-responsive">
+            <table class="data-table" id="table-group-comparisons">
+              <thead>
+                <tr>
+                  <th>Glycan Composition</th>
+                  <th>Groups Compared</th>
+                  <th>Group Means (%)</th>
+                  <th>log2 Fold Change</th>
+                  <th>Parametric Test</th>
+                  <th>p-value</th>
+                  <th>BH-FDR q-value</th>
+                  <th>Non-Parametric p-value</th>
+                  <th>Significant (q &lt; 0.05)</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr><td colspan="9" class="muted">Run cohort statistics to view group comparison table.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- =============================================================== -->
+      <!-- VIEW 10: EXPORT RESULTS                                         -->
+      <!-- =============================================================== -->
+      <section id="view-exports" class="view-section" aria-labelledby="heading-exports">
+        <div class="section-header">
+          <h2 id="heading-exports">Export Results</h2>
+          <p>Download any of the 12 standardized analytical tables as CSV, TSV, multi-sheet Excel (`.xlsx`), JSON, vector PDF report, or complete `.zip` bundle.</p>
+        </div>
+
+        <div class="panel">
+          <h3>One-Click Complete Export Bundles</h3>
+          <div class="button-row">
+            <button type="button" class="btn btn-primary" id="btn-export-zip">Download Complete ZIP Bundle (All 12 Categories + Plots + PDF)</button>
+            <button type="button" class="btn btn-secondary" id="btn-export-xlsx">Download Multi-Sheet Excel Workbook (.xlsx)</button>
+            <button type="button" class="btn btn-secondary" id="btn-export-pdf">Download Multi-Page Summary Report (.pdf)</button>
+            <button type="button" class="btn btn-outline" id="btn-export-json">Download Full Analytical Manifest (.json)</button>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h3>Individual Standardized Table Exports (12 Categories)</h3>
+          <div class="export-grid">
+            <div class="export-card" data-category="annotated_peaks">
+              <h4>01. Annotated MS1 Peaks</h4>
+              <p>Top-ranked glycan candidate per matched MS1 peak.</p>
+              <div class="button-row">
+                <button type="button" class="btn btn-sm btn-outline btn-dl-cat" data-cat="annotated_peaks" data-fmt="csv">CSV</button>
+                <button type="button" class="btn btn-sm btn-outline btn-dl-cat" data-cat="annotated_peaks" data-fmt="tsv">TSV</button>
+              </div>
+            </div>
+            <div class="export-card" data-category="all_glycan_candidates">
+              <h4>02. All Glycan Candidates</h4>
+              <p>Complete one-to-many ranked candidate matches and alternatives.</p>
+              <div class="button-row">
+                <button type="button" class="btn btn-sm btn-outline btn-dl-cat" data-cat="all_glycan_candidates" data-fmt="csv">CSV</button>
+                <button type="button" class="btn btn-sm btn-outline btn-dl-cat" data-cat="all_glycan_candidates" data-fmt="tsv">TSV</button>
+              </div>
+            </div>
+            <div class="export-card" data-category="quantified_glycans">
+              <h4>03. Quantified Glycans</h4>
+              <p>Base-peak %, relative abundance %, and adduct aggregation provenance.</p>
+              <div class="button-row">
+                <button type="button" class="btn btn-sm btn-outline btn-dl-cat" data-cat="quantified_glycans" data-fmt="csv">CSV</button>
+                <button type="button" class="btn btn-sm btn-outline btn-dl-cat" data-cat="quantified_glycans" data-fmt="tsv">TSV</button>
+              </div>
+            </div>
+            <div class="export-card" data-category="replicate_abundance_matrix">
+              <h4>04. Replicate Abundance Matrix</h4>
+              <p>Sample-by-glycan matrix with Mean, SD, CV %, and unimputed missingness.</p>
+              <div class="button-row">
+                <button type="button" class="btn btn-sm btn-outline btn-dl-cat" data-cat="replicate_abundance_matrix" data-fmt="csv">CSV</button>
+                <button type="button" class="btn btn-sm btn-outline btn-dl-cat" data-cat="replicate_abundance_matrix" data-fmt="tsv">TSV</button>
+              </div>
+            </div>
+            <div class="export-card" data-category="derived_glycan_traits">
+              <h4>05. Derived Glycan Traits</h4>
+              <p>Class totals, fucosylation %, sialylation %, and branching hypotheses.</p>
+              <div class="button-row">
+                <button type="button" class="btn btn-sm btn-outline btn-dl-cat" data-cat="derived_glycan_traits" data-fmt="csv">CSV</button>
+                <button type="button" class="btn btn-sm btn-outline btn-dl-cat" data-cat="derived_glycan_traits" data-fmt="tsv">TSV</button>
+              </div>
+            </div>
+            <div class="export-card" data-category="glycopeptide_candidates">
+              <h4>06. Glycopeptide Candidates</h4>
+              <p>In-silico digested sequon peptides + attached glycan moiety matches.</p>
+              <div class="button-row">
+                <button type="button" class="btn btn-sm btn-outline btn-dl-cat" data-cat="glycopeptide_candidates" data-fmt="csv">CSV</button>
+                <button type="button" class="btn btn-sm btn-outline btn-dl-cat" data-cat="glycopeptide_candidates" data-fmt="tsv">TSV</button>
+              </div>
+            </div>
+            <div class="export-card" data-category="calibration_diagnostics">
+              <h4>07. Calibration Diagnostics</h4>
+              <p>Matched reference calibrants, polynomial coefficients, and ppm residuals.</p>
+              <div class="button-row">
+                <button type="button" class="btn btn-sm btn-outline btn-dl-cat" data-cat="calibration_diagnostics" data-fmt="csv">CSV</button>
+                <button type="button" class="btn btn-sm btn-outline btn-dl-cat" data-cat="calibration_diagnostics" data-fmt="tsv">TSV</button>
+              </div>
+            </div>
+            <div class="export-card" data-category="quality_control_summary">
+              <h4>08. Quality Control Summary</h4>
+              <p>MassyTools-inspired QC metrics, status badges, and threshold sources.</p>
+              <div class="button-row">
+                <button type="button" class="btn btn-sm btn-outline btn-dl-cat" data-cat="quality_control_summary" data-fmt="csv">CSV</button>
+                <button type="button" class="btn btn-sm btn-outline btn-dl-cat" data-cat="quality_control_summary" data-fmt="tsv">TSV</button>
+              </div>
+            </div>
+            <div class="export-card" data-category="statistical_analysis">
+              <h4>09. Statistical Analysis</h4>
+              <p>Descriptive stats, group comparisons, BH-FDR q-values, ROC, and CV ML.</p>
+              <div class="button-row">
+                <button type="button" class="btn btn-sm btn-outline btn-dl-cat" data-cat="statistical_analysis" data-fmt="csv">CSV</button>
+                <button type="button" class="btn btn-sm btn-outline btn-dl-cat" data-cat="statistical_analysis" data-fmt="tsv">TSV</button>
+              </div>
+            </div>
+            <div class="export-card" data-category="glycan_reference_library">
+              <h4>10. Glycan Reference Library</h4>
+              <p>Active N-glycan composition library with theoretical neutral and adduct m/z.</p>
+              <div class="button-row">
+                <button type="button" class="btn btn-sm btn-outline btn-dl-cat" data-cat="glycan_reference_library" data-fmt="csv">CSV</button>
+                <button type="button" class="btn btn-sm btn-outline btn-dl-cat" data-cat="glycan_reference_library" data-fmt="tsv">TSV</button>
+              </div>
+            </div>
+            <div class="export-card" data-category="analysis_parameters_and_reproducibility">
+              <h4>11. Reproducibility Parameters</h4>
+              <p>Software version, library version, tolerances, adducts, and policies.</p>
+              <div class="button-row">
+                <button type="button" class="btn btn-sm btn-outline btn-dl-cat" data-cat="analysis_parameters_and_reproducibility" data-fmt="csv">CSV</button>
+                <button type="button" class="btn btn-sm btn-outline btn-dl-cat" data-cat="analysis_parameters_and_reproducibility" data-fmt="tsv">TSV</button>
+              </div>
+            </div>
+            <div class="export-card" data-category="processing_and_error_log">
+              <h4>12. Processing &amp; Error Log</h4>
+              <p>Timestamped execution log, warnings, and failed-file diagnostics.</p>
+              <div class="button-row">
+                <button type="button" class="btn btn-sm btn-outline btn-dl-cat" data-cat="processing_and_error_log" data-fmt="csv">CSV</button>
+                <button type="button" class="btn btn-sm btn-outline btn-dl-cat" data-cat="processing_and_error_log" data-fmt="tsv">TSV</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- =============================================================== -->
+      <!-- VIEW 11: SETTINGS                                               -->
+      <!-- =============================================================== -->
+      <section id="view-settings" class="view-section" aria-labelledby="heading-settings">
+        <div class="section-header">
+          <h2 id="heading-settings">Settings</h2>
+          <p>Configure default mass accuracy tolerances, QC threshold provenance, and workspace session state.</p>
+        </div>
+
+        <div class="card-grid-2">
+          <div class="panel">
+            <h3>Default Analytical Preferences</h3>
+            <div class="form-grid">
+              <div class="form-group">
+                <label for="set-default-ppm">Default MS1 Tolerance (ppm)</label>
+                <input type="number" id="set-default-ppm" value="25.0" min="1" step="1" />
+              </div>
+              <div class="form-group">
+                <label for="set-qc-max-ppm">QC Pass Max Median |ppm| Threshold</label>
+                <input type="number" id="set-qc-max-ppm" value="25.0" min="1" step="1" />
+              </div>
+              <div class="form-group">
+                <label for="set-qc-min-peaks">QC Pass Min Matched Peaks</label>
+                <input type="number" id="set-qc-min-peaks" value="5" min="1" step="1" />
+              </div>
+            </div>
+            <div class="button-row">
+              <button type="button" class="btn btn-primary" id="btn-save-settings">Apply Settings to Active Session</button>
+              <button type="button" class="btn btn-outline" id="btn-clear-session">Reset Active Session State</button>
+            </div>
+          </div>
+
+          <div class="panel">
+            <h3>Platform Runtime Configuration</h3>
+            <ul class="safeguard-list">
+              <li><strong>Max Single Upload Size:</strong> 50 MB</li>
+              <li><strong>Max Batch Upload Size:</strong> 200 MB (max 200 files per batch)</li>
+              <li><strong>External Network Calls:</strong> Disabled by default (100% offline execution)</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <!-- =============================================================== -->
+      <!-- VIEW 12: HELP AND DOCUMENTATION                                 -->
+      <!-- =============================================================== -->
+      <section id="view-help" class="view-section" aria-labelledby="heading-help">
+        <div class="section-header">
+          <h2 id="heading-help">Help and Documentation</h2>
+          <p>Authoritative scientific constants, mass calculation formulas, and file format guidelines.</p>
+        </div>
+
+        <div class="card-grid-2">
+          <div class="panel">
+            <h3>Authoritative Monoisotopic Residue Masses (IUPAC / NIST / GlycoMod)</h3>
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Monosaccharide</th>
+                  <th>Symbol</th>
+                  <th>Residue Formula</th>
+                  <th>Residue Mass (Da)</th>
+                  <th>Free Mass (+H2O, Da)</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr><td>Hexose (Man/Gal/Glc)</td><td><code>Hex</code></td><td>C6H10O5</td><td>162.0528234315</td><td>180.0633881175</td></tr>
+                <tr><td>N-Acetylhexosamine</td><td><code>HexNAc</code></td><td>C8H13NO5</td><td>203.0793725330</td><td>221.0899372190</td></tr>
+                <tr><td>Deoxyhexose (Fucose)</td><td><code>dHex</code></td><td>C6H10O4</td><td>146.0579088090</td><td>164.0684734950</td></tr>
+                <tr><td>N-Acetylneuraminic acid</td><td><code>Neu5Ac</code></td><td>C11H17NO8</td><td>291.0954165270</td><td>309.1059812130</td></tr>
+                <tr><td>N-Glycolylneuraminic acid</td><td><code>Neu5Gc</code></td><td>C11H17NO9</td><td>307.0903311490</td><td>325.1008958350</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="panel">
+            <h3>Bruker MALDI-TOF Format Conversion Guide</h3>
+            <p>
+              <strong>Supported Directly:</strong> Exported peak lists and profile spectra from Bruker flexAnalysis (`.txt`, `.xy`, `.csv`), standard `mzML` / `mzXML` files, and unencrypted 1D `.fid` + JCAMP-DX `acqus` pairs.
+            </p>
+            <p>
+              <strong>Proprietary Binary Containers (`.baf`, `.tdf`):</strong> Vendor-locked binary databases require Bruker SDK DLLs and must be converted prior to import using either:
+            </p>
+            <ol class="workflow-steps">
+              <li><strong>Bruker flexAnalysis / CompassXport:</strong> <em>File &rarr; Export &rarr; ASCII (.xy / .txt)</em> or <em>mzML</em>.</li>
+              <li><strong>ProteoWizard msconvert:</strong> <code>msconvert sample.d --mzML --64 --zlib</code>.</li>
+            </ol>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <script src="/static/js/app.js"></script>
+</body>
+</html>
